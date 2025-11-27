@@ -2,9 +2,16 @@ name: Altın Botu Çalıştır
 
 on:
   schedule:
-    # Her saat başı çalışır (Saat dilimi UTC'dir, TR saatiyle 3 saat fark eder ama önemli değil)
-    - cron: '0 * * * *'
-  # İstersen butona basarak elle de çalıştırabilirsin
+    # 1. HER GÜN (Hafta içi + Hafta sonu) Sabah 10:20 (TR) / 07:20 (UTC)
+    - cron: '20 7 * * *'
+    
+    # 2. SADECE HAFTA İÇİ (Pzt-Cuma) 11:00 ile 17:00 arası saat başı
+    # (TR saatiyle 11, 12, 13, 14, 15, 16, 17) -> UTC: 8, 9...14
+    - cron: '0 8-14 * * 1-5'
+    
+    # 3. HER GÜN (Hafta içi + Hafta sonu) Akşam Kapanış 18:15 (TR) / 15:15 (UTC)
+    - cron: '15 15 * * *'
+
   workflow_dispatch:
 
 jobs:
