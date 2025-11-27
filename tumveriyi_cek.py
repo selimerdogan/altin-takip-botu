@@ -1,21 +1,20 @@
 import requests
-from bs4 import BeautifulSoup
 import firebase_admin
 from firebase_admin import credentials, firestore
-from datetime import datetime
+from datetime import datetime, timedelta
 import sys
 import os
 import yfinance as yf
 import pandas as pd
 import warnings
 
-# Uyarıları gizle
+# Gereksiz uyarıları kapat
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 # --- AYARLAR ---
 headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/115.0.0.0 Safari/537.36",
-    "X-Requested-With": "XMLHttpRequest" # TEFAS için gerekli
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+    "Referer": "https://www.google.com/"
 }
 
 # --- FIREBASE BAĞLANTISI ---
@@ -35,22 +34,37 @@ except Exception as e:
 def metni_sayiya_cevir(metin):
     try:
         temiz = str(metin).replace('TL', '').replace('USD', '').replace('$', '').replace('%', '').strip()
-        # TEFAS bazen 34,123456 gibi uzun virgüllü verir
         return float(temiz.replace('.', '').replace(',', '.'))
     except:
         return 0.0
 
 # ==============================================================================
-# 1. YATIRIM FONLARI (TEFAS API - ARKA KAPI)
+# 1. YATIRIM FONLARI (TEFAS - GÜÇLENDİRİLMİŞ MOD)
 # ==============================================================================
 def get_tefas_data():
     """
-    TEFAS'ın resmi sunucusuna istek atıp TÜM fonları tek seferde çeker.
+    TEFAS'tan son 7 günün verisini çeker ve her fonun EN GÜNCEL fiyatını alır.
+    Böylece 'Bugün veri yok' sorununu çözer.
     """
     url = "https://www.tefas.gov.tr/api/DB/BindComparisonFundReturns"
     data_fon = {}
     
-    # Bu veri paketi TEFAS'a "Bana fonları ver" der.
+    # Tarih Hesaplama: Bugünden geriye 10 gün bakalım (Tatiller için garanti olsun)
+    bugun = datetime.now()
+    gecmis = bugun - timedelta(days=10)
+    
+    date_str_start = gecmis.strftime("%d.%m.%Y")
+    date_str_end = bugun.strftime("%d.%m.%Y")
+    
+    # TEFAS'ın istediği özel başlıklar (Tarayıcı taklidi)
+    tefas_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/115.0.0.0 Safari/537.36",
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": "https://www.tefas.gov.tr/FonKarsilastirma.aspx",
+        "Origin": "https://www.tefas.gov.tr",
+        "Content-Type": "application/json; charset=UTF-8"
+    }
+
     payload = {
         "calismatipi": "2",
         "fontip": "YAT",
@@ -58,47 +72,46 @@ def get_tefas_data():
         "fas": "",
         "fonturkod": "",
         "fongrup": "",
-        "bastarih": datetime.now().strftime("%d.%m.%Y"), # Bugün
-        "bittarih": datetime.now().strftime("%d.%m.%Y"),
+        "bastarih": date_str_start, 
+        "bittarih": date_str_end,
         "fontur": "",
         "fonkurucukod": "",
         "gecenin_rengi": ""
     }
     
     try:
-        print("   -> TEFAS'tan Fon verileri çekiliyor...")
-        # TEFAS POST isteği bekler
-        r = requests.post(url, json=payload, headers=headers)
+        print(f"   -> TEFAS Fonları çekiliyor ({date_str_start} - {date_str_end})...")
+        r = requests.post(url, json=payload, headers=tefas_headers, timeout=30)
         
         if r.status_code == 200:
             sonuc = r.json()
             data_list = sonuc.get('data', [])
             
+            # TEFAS karşılaştırma listesi genellikle en son fiyatı getirir.
+            # Biz yine de garantiye alalım.
             for fon in data_list:
-                # TEFAS'tan gelen veriler: FONKODU, FIYAT, FONUNADI
                 kod = fon.get('FONKODU')
                 fiyat = fon.get('FIYAT')
+                ad = fon.get('FONADI')
                 
                 if kod and fiyat:
-                    # Fiyat 12,345678 gelebilir, floata çevirelim
-                    # TEFAS ondalık için virgül kullanır, binlik ayracı nokta değildir genelde.
-                    # Ama garanti olsun diye metni_sayiya_cevir kullanmayalım, özel işlem yapalım.
                     try:
+                        # 12,3456 formatını 12.3456 yap
                         fiyat_float = float(str(fiyat).replace(',', '.'))
                         data_fon[kod] = fiyat_float
                     except: continue
             
-            print(f"   -> ✅ TEFAS Bitti: {len(data_fon)} adet fon alındı.")
+            print(f"   -> ✅ TEFAS Başarılı: {len(data_fon)} adet fon güncellendi.")
         else:
-            print(f"   -> ⚠️ TEFAS Hatası: Kod {r.status_code}")
+            print(f"   -> ⚠️ TEFAS Sunucu Hatası: {r.status_code}")
             
     except Exception as e:
-        print(f"   -> ⚠️ TEFAS Bağlantı Hatası: {e}")
+        print(f"   -> ⚠️ TEFAS Bağlantı Sorunu: {e}")
         
     return data_fon
 
 # ==============================================================================
-# 2. ABD BORSASI (S&P 500 GÖMÜLÜ LİSTE)
+# 2. ABD BORSASI
 # ==============================================================================
 LISTE_ABD = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "BRK-B", "LLY", "AVGO", "V", "JPM", "XOM", "WMT", "UNH", "MA", "PG", "JNJ", "HD", "MRK", "COST", "ABBV", "CVX", "CRM", "BAC", "AMD", "PEP", "KO", "NFLX", "ADBE", "DIS", "MCD", "CSCO", "TMUS", "ABT", "INTC", "INTU", "CMCSA", "PFE", "NKE", "WFC", "QCOM", "TXN", "DHR", "PM", "UNP", "IBM", "AMGN", "GE", "HON", "BA", "SPY", "QQQ", "UBER", "PLTR",
@@ -130,25 +143,26 @@ LISTE_DOVIZ = [
 ]
 
 # ==============================================================================
-# 5. BIST (TAM LİSTE)
+# 5. BIST (HATALI HİSSELER TEMİZLENDİ)
 # ==============================================================================
+# Çıkarılanlar: IDEAS, ITTFH, ALMAD, GRTRK, PLAT, ISKUR, QNBFB, QNBFL, DAGHL, CPE, LPI, PEGYO, FZCMI, MRO, ESTE, LORAS, MIPAZ, PDCE, DFS, CHK, OAS, WAKP, HES, WLL, YAC
 LISTE_BIST = [
-    "A1CAP.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "ADGYO.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AGROT.IS", "AGYO.IS", "AHGAZ.IS", "AKBNK.IS", "AKCNS.IS", "AKENR.IS", "AKFGY.IS", "AKFYE.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", "AKSEN.IS", "AKSGY.IS", "AKSUE.IS", "AKYHO.IS", "ALARK.IS", "ALBRK.IS", "ALCAR.IS", "ALCTL.IS", "ALFAS.IS", "ALGYO.IS", "ALKA.IS", "ALKIM.IS", "ALMAD.IS", "ALTNY.IS", "ANELE.IS", "ANGEN.IS", "ANHYT.IS", "ANSGR.IS", "ARASE.IS", "ARCLK.IS", "ARDYZ.IS", "ARENA.IS", "ARSAN.IS", "ARZUM.IS", "ASELS.IS", "ASGYO.IS", "ASTOR.IS", "ASUZU.IS", "ATAGY.IS", "ATAKP.IS", "ATATP.IS", "ATEKS.IS", "ATLAS.IS", "ATSYH.IS", "AVGYO.IS", "AVHOL.IS", "AVOD.IS", "AVPGY.IS", "AVTUR.IS", "AYCES.IS", "AYDEM.IS", "AYEN.IS", "AYES.IS", "AYGAZ.IS", "AZTEK.IS", 
+    "A1CAP.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "ADGYO.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AGROT.IS", "AGYO.IS", "AHGAZ.IS", "AKBNK.IS", "AKCNS.IS", "AKENR.IS", "AKFGY.IS", "AKFYE.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", "AKSEN.IS", "AKSGY.IS", "AKSUE.IS", "AKYHO.IS", "ALARK.IS", "ALBRK.IS", "ALCAR.IS", "ALCTL.IS", "ALFAS.IS", "ALGYO.IS", "ALKA.IS", "ALKIM.IS", "ALTNY.IS", "ANELE.IS", "ANGEN.IS", "ANHYT.IS", "ANSGR.IS", "ARASE.IS", "ARCLK.IS", "ARDYZ.IS", "ARENA.IS", "ARSAN.IS", "ARZUM.IS", "ASELS.IS", "ASGYO.IS", "ASTOR.IS", "ASUZU.IS", "ATAGY.IS", "ATAKP.IS", "ATATP.IS", "ATEKS.IS", "ATLAS.IS", "ATSYH.IS", "AVGYO.IS", "AVHOL.IS", "AVOD.IS", "AVPGY.IS", "AVTUR.IS", "AYCES.IS", "AYDEM.IS", "AYEN.IS", "AYES.IS", "AYGAZ.IS", "AZTEK.IS", 
     "BAGFS.IS", "BAKAB.IS", "BALAT.IS", "BANVT.IS", "BARMA.IS", "BASCM.IS", "BASGZ.IS", "BAYRK.IS", "BEGYO.IS", "BERA.IS", "BEYAZ.IS", "BFREN.IS", "BIENY.IS", "BIGCH.IS", "BIMAS.IS", "BINHO.IS", "BIOEN.IS", "BIZIM.IS", "BJKAS.IS", "BLCYT.IS", "BMSCH.IS", "BMSTL.IS", "BNTAS.IS", "BOBET.IS", "BORLS.IS", "BOSSA.IS", "BRISA.IS", "BRKO.IS", "BRKSN.IS", "BRKVY.IS", "BRLSM.IS", "BRMEN.IS", "BRSAN.IS", "BRYAT.IS", "BSOKE.IS", "BTCIM.IS", "BUCIM.IS", "BURCE.IS", "BURVA.IS", "BVSAN.IS", "BYDNR.IS", 
     "CANTE.IS", "CASA.IS", "CCOLA.IS", "CELHA.IS", "CEMAS.IS", "CEMTS.IS", "CEOEM.IS", "CIMSA.IS", "CLEBI.IS", "CMBTN.IS", "CMENT.IS", "CONSE.IS", "COSMO.IS", "CRDFA.IS", "CRFSA.IS", "CUSAN.IS", "CVKMD.IS", "CWENE.IS", 
     "DAPGM.IS", "DARDL.IS", "DENGE.IS", "DERHL.IS", "DERIM.IS", "DESA.IS", "DESPC.IS", "DEVA.IS", "DGATE.IS", "DGGYO.IS", "DGNMO.IS", "DIRIT.IS", "DITAS.IS", "DMSAS.IS", "DNISI.IS", "DOAS.IS", "DOBUR.IS", "DOCO.IS", "DOGUB.IS", "DOHOL.IS", "DOKTA.IS", "DURDO.IS", "DYOBY.IS", "DZGYO.IS", 
     "EBEBK.IS", "ECILC.IS", "ECZYT.IS", "EDATA.IS", "EDIP.IS", "EGEEN.IS", "EGGUB.IS", "EGPRO.IS", "EGSER.IS", "EKGYO.IS", "EKIZ.IS", "EKSUN.IS", "ELITE.IS", "EMKEL.IS", "EMNIS.IS", "ENJSA.IS", "ENKAI.IS", "ENSRI.IS", "EPLAS.IS", "ERBOS.IS", "ERCB.IS", "EREGL.IS", "ERSU.IS", "ESCAR.IS", "ESCOM.IS", "ESEN.IS", "ETILR.IS", "ETYAT.IS", "EUHOL.IS", "EUKYO.IS", "EUPWR.IS", "EUREN.IS", "EUYO.IS", "EYGYO.IS", 
     "FADE.IS", "FENER.IS", "FLAP.IS", "FMIZP.IS", "FONET.IS", "FORMT.IS", "FORTE.IS", "FRIGO.IS", "FROTO.IS", 
-    "GARAN.IS", "GARFA.IS", "GEDIK.IS", "GEDZA.IS", "GENIL.IS", "GENTS.IS", "GEREL.IS", "GESAN.IS", "GIPTA.IS", "GLBMD.IS", "GLRYH.IS", "GLYHO.IS", "GMTAS.IS", "GOKNR.IS", "GOLTS.IS", "GOODY.IS", "GOZDE.IS", "GRNYO.IS", "GRSEL.IS", "GRTRK.IS", "GUBRF.IS", "GWIND.IS", "GZNMI.IS", 
+    "GARAN.IS", "GARFA.IS", "GEDIK.IS", "GEDZA.IS", "GENIL.IS", "GENTS.IS", "GEREL.IS", "GESAN.IS", "GIPTA.IS", "GLBMD.IS", "GLRYH.IS", "GLYHO.IS", "GMTAS.IS", "GOKNR.IS", "GOLTS.IS", "GOODY.IS", "GOZDE.IS", "GRNYO.IS", "GRSEL.IS", "GWIND.IS", "GZNMI.IS", 
     "HALKB.IS", "HATEK.IS", "HATSN.IS", "HDFGS.IS", "HEDEF.IS", "HEKTS.IS", "HKTM.IS", "HLGYO.IS", "HTTBT.IS", "HUBVC.IS", "HUNER.IS", "HURGZ.IS", 
-    "ICBCT.IS", "IDEAS.IS", "IDGYO.IS", "IEYHO.IS", "IHAAS.IS", "IHEVA.IS", "IHGZT.IS", "IHLAS.IS", "IHLGM.IS", "IHYAY.IS", "IMASM.IS", "INDES.IS", "INFO.IS", "INGRM.IS", "INTEM.IS", "INVEO.IS", "INVES.IS", "IPEKE.IS", "ISATR.IS", "ISBIR.IS", "ISBTR.IS", "ISCTR.IS", "ISDMR.IS", "ISFIN.IS", "ISGSY.IS", "ISGYO.IS", "ISKPL.IS", "ISKUR.IS", "ISMEN.IS", "ISSEN.IS", "ISYAT.IS", "ITTFH.IS", "IZENR.IS", "IZFAS.IS", "IZINV.IS", "IZMDC.IS", 
+    "ICBCT.IS", "IDGYO.IS", "IEYHO.IS", "IHAAS.IS", "IHEVA.IS", "IHGZT.IS", "IHLAS.IS", "IHLGM.IS", "IHYAY.IS", "IMASM.IS", "INDES.IS", "INFO.IS", "INGRM.IS", "INTEM.IS", "INVEO.IS", "INVES.IS", "IPEKE.IS", "ISATR.IS", "ISBIR.IS", "ISBTR.IS", "ISCTR.IS", "ISDMR.IS", "ISFIN.IS", "ISGSY.IS", "ISGYO.IS", "ISKPL.IS", "ISMEN.IS", "ISSEN.IS", "ISYAT.IS", "IZENR.IS", "IZFAS.IS", "IZINV.IS", "IZMDC.IS", 
     "JANTS.IS", 
     "KAPLM.IS", "KAREL.IS", "KARSN.IS", "KARTN.IS", "KATMR.IS", "KAYSE.IS", "KCAER.IS", "KFEIN.IS", "KGYO.IS", "KIMMR.IS", "KLGYO.IS", "KLKIM.IS", "KLMSN.IS", "KLNMA.IS", "KLRHO.IS", "KLSYN.IS", "KMPUR.IS", "KNFRT.IS", "KONKA.IS", "KONTR.IS", "KONYA.IS", "KOPOL.IS", "KORDS.IS", "KOZAA.IS", "KOZAL.IS", "KRDMA.IS", "KRDMB.IS", "KRDMD.IS", "KRGYO.IS", "KRONT.IS", "KRPLS.IS", "KRSTL.IS", "KRTEK.IS", "KRVGD.IS", "KSTUR.IS", "KTLEV.IS", "KTSKR.IS", "KUTPO.IS", "KUYAS.IS", "KZBGY.IS", "KZGYO.IS", 
     "LIDER.IS", "LIDFA.IS", "LINK.IS", "LKMNH.IS", "LOGO.IS", "LUKSK.IS", 
     "MAALT.IS", "MACKO.IS", "MAGEN.IS", "MAKIM.IS", "MAKTK.IS", "MANAS.IS", "MARKA.IS", "MARTI.IS", "MAVI.IS", "MEDTR.IS", "MEGAP.IS", "MEPET.IS", "MERCN.IS", "MERIT.IS", "MERKO.IS", "METRO.IS", "METUR.IS", "MGROS.IS", "MIATK.IS", "MMCAS.IS", "MNDRS.IS", "MNDTR.IS", "MOBTL.IS", "MPARK.IS", "MRGYO.IS", "MRSHL.IS", "MSGYO.IS", "MTRKS.IS", "MTRYO.IS", "MZHLD.IS", 
     "NATEN.IS", "NETAS.IS", "NIBAS.IS", "NTGAZ.IS", "NTHOL.IS", "NUGYO.IS", "NUHCM.IS", 
     "OBAMS.IS", "ODAS.IS", "OFSYM.IS", "ONCSM.IS", "ORCAY.IS", "ORGE.IS", "ORMA.IS", "OSMEN.IS", "OSTIM.IS", "OTKAR.IS", "OTTO.IS", "OYAKC.IS", "OYAYO.IS", "OYLUM.IS", "OYYAT.IS", "OZGYO.IS", "OZKGY.IS", "OZRDN.IS", "OZSUB.IS", 
-    "PAGYO.IS", "PAMEL.IS", "PAPIL.IS", "PARSN.IS", "PASEU.IS", "PCILT.IS", "PEKGY.IS", "PENGD.IS", "PENTA.IS", "PETKM.IS", "PETUN.IS", "PGSUS.IS", "PINSU.IS", "PKART.IS", "PKENT.IS", "PLAT.IS", "PLTUR.IS", "PNLSN.IS", "PNSUT.IS", "POLHO.IS", "POLTK.IS", "PRDGS.IS", "PRKAB.IS", "PRKME.IS", "PRZMA.IS", "PSGYO.IS", "PSDTC.IS", 
+    "PAGYO.IS", "PAMEL.IS", "PAPIL.IS", "PARSN.IS", "PASEU.IS", "PCILT.IS", "PEKGY.IS", "PENGD.IS", "PENTA.IS", "PETKM.IS", "PETUN.IS", "PGSUS.IS", "PINSU.IS", "PKART.IS", "PKENT.IS", "PLTUR.IS", "PNLSN.IS", "PNSUT.IS", "POLHO.IS", "POLTK.IS", "PRDGS.IS", "PRKAB.IS", "PRKME.IS", "PRZMA.IS", "PSGYO.IS", "PSDTC.IS", 
     "QUAGR.IS", 
     "RALYH.IS", "RAYSG.IS", "REEDR.IS", "RNPOL.IS", "RODRG.IS", "ROYAL.IS", "RTALB.IS", "RUBNS.IS", "RYGYO.IS", "RYSAS.IS", 
     "SAHOL.IS", "SAMAT.IS", "SANEL.IS", "SANFM.IS", "SANKO.IS", "SARKY.IS", "SASA.IS", "SAYAS.IS", "SDTTR.IS", "SEKFK.IS", "SEKUR.IS", "SELEC.IS", "SELGD.IS", "SELVA.IS", "SEYKM.IS", "SILVR.IS", "SISE.IS", "SKBNK.IS", "SKTAS.IS", "SMART.IS", "SMRTG.IS", "SNGYO.IS", "SNKRN.IS", "SNPAM.IS", "SODSN.IS", "SOKE.IS", "SOKM.IS", "SONME.IS", "SRVGY.IS", "SUMAS.IS", "SUNTK.IS", "SURGY.IS", "SUWEN.IS", 
@@ -164,7 +178,7 @@ LISTE_BIST = [
 # ==============================================================================
 
 try:
-    print("--- MEGA FİNANS BOTU (YATIRIM FONLARI DAHİL) ---")
+    print("--- MEGA FİNANS BOTU (YATIRIM FONLARI + TEMİZ LİSTE) ---")
     
     # 1. YATIRIM FONLARI (TEFAS)
     data_fonlar = get_tefas_data()
@@ -209,6 +223,7 @@ try:
     try:
         session = requests.Session()
         r = session.get("https://altin.doviz.com/", headers=headers, timeout=20)
+        from bs4 import BeautifulSoup # Local import
         if r.status_code == 200:
             soup = BeautifulSoup(r.content, "html.parser")
             for satir in soup.find_all("tr"):
@@ -230,7 +245,7 @@ try:
         "kripto_usd": data_kripto,
         "doviz_tl": data_doviz,
         "altin_tl": data_altin,
-        "fon_tl": data_fonlar # YENİ EKLENDİ
+        "fon_tl": data_fonlar
     }
 
     if any(final_paket.values()):
