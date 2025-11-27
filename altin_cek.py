@@ -5,7 +5,9 @@ from firebase_admin import credentials, firestore
 from datetime import datetime
 
 # --- 1. AYARLAR ---
-url = "https://altin.doviz.com/"
+url_altin = "https://altin.doviz.com/"
+url_kur = "https://www.doviz.com/" # Dolar kurunu buradan alacağız
+
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 }
@@ -17,52 +19,70 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 
+# Yardımcı Fonksiyon: Metni Sayıya Çevir (Dolar işaretini de temizler)
 def metni_sayiya_cevir(metin):
     try:
-        return float(metin.replace('.', '').replace(',', '.'))
+        metin = str(metin)
+        # Dolar, TL ve harfleri sil
+        temiz = metin.replace('$', '').replace('USD', '').replace('TL', '').strip()
+        # 2.650,50 -> 2650.50 formatına dönüştür
+        return float(temiz.replace('.', '').replace(',', '.'))
     except:
         return 0.0
 
-# Türkçe karakterleri bozmadan, sadece boşlukları düzelten fonksiyon
-def ismi_duzenle(isim):
-    return isim.strip()
-
 try:
-    print("Veri çekme işlemi başladı...")
+    print("İşlem başlıyor...")
     
-    # --- 2. VERİYİ ÇEK ---
-    response = requests.get(url, headers=headers)
+    # --- ADIM A: GÜNCEL DOLAR KURUNU ÇEK ---
+    # Ons Altın'ı TL'ye çevirmek için dolar kuruna ihtiyacımız var.
+    resp_kur = requests.get(url_kur, headers=headers)
+    tablolar_kur = pd.read_html(resp_kur.text)
+    
+    # Genellikle ana sayfadaki ilk tablo kurları verir
+    # "DOLAR" yazan satırı bulup SATIŞ fiyatını alıyoruz
+    df_kur = tablolar_kur[0]
+    
+    # Tabloda "Dolar" veya "ABD Doları" geçen satırı bul
+    dolar_satiri = df_kur[df_kur.iloc[:, 0].str.contains("Dolar", case=False, na=False)]
+    dolar_satis_fiyati = dolar_satiri.iloc[0, 2] # 2. Sütun genellikle Satış'tır
+    
+    guncel_dolar_kuru = metni_sayiya_cevir(dolar_satis_fiyati)
+    print(f"Güncel Dolar Kuru Alındı: {guncel_dolar_kuru} TL")
+
+    # --- ADIM B: ALTIN FİYATLARINI ÇEK ---
+    response = requests.get(url_altin, headers=headers)
     tablolar = pd.read_html(response.text)
     df = tablolar[0].iloc[:, [0, 2]] # İsim ve Satış Fiyatı
     df.columns = ["isim", "fiyat"]
     
-    # --- 3. VERİYİ HAZIRLA (CÖMERT MOD: TAM İSİMLER) ---
     veri_sozlugu = {}
     
     for index, satir in df.iterrows():
-        # Artık kısaltma yok, sitedeki ismin aynısını alıyoruz
-        # Örn: "Gram Altın" -> "Gram Altın"
-        altin_ismi = ismi_duzenle(satir['isim'])
+        isim = satir['isim'].strip()
+        ham_fiyat = satir['fiyat']
         
-        # Fiyatı sayıya çevir
-        fiyat = metni_sayiya_cevir(satir['fiyat'])
+        # Sayısal değere çevir (Dolar işareti varsa temizlenir)
+        fiyat_sayi = metni_sayiya_cevir(ham_fiyat)
         
-        # Sözlüğe ekle
-        veri_sozlugu[altin_ismi] = fiyat
+        # --- KRİTİK NOKTA: ONS ALTIN ÇEVİRİSİ ---
+        # Eğer isimde "Ons" geçiyorsa ve fiyat mantıken çok düşükse (TL değil USD ise)
+        # veya ham veride '$' işareti varsa çarpma işlemi yap.
+        if "Ons" in isim:
+            tl_karsiligi = fiyat_sayi * guncel_dolar_kuru
+            # Veritabanına TL karşılığını yaz (Virgülden sonra 2 hane)
+            veri_sozlugu[isim] = round(tl_karsiligi, 2)
+            print(f"Ons Altın ({fiyat_sayi} USD) -> TL'ye çevrildi: {veri_sozlugu[isim]} TL")
+        else:
+            # Diğerleri zaten TL, olduğu gibi yaz
+            veri_sozlugu[isim] = fiyat_sayi
             
-    # Tarih Ayarları (Türkiye Saati Değil, Sunucu Saati ile kaydedilir ama sorun değil)
-    # İstersen +3 saat ekleme yapılabilir ama standart kalması daha iyidir.
+    # --- ADIM C: FIREBASE KAYDI ---
     simdi = datetime.now()
-    bugun_tarih = simdi.strftime("%Y-%m-%d") # 2025-11-27
+    bugun_tarih = simdi.strftime("%Y-%m-%d")
+    su_an_saat_dakika = simdi.strftime("%H:%M")
     
-    # Dakikayı da ekleyelim ki 18:15 ile 18:00 farkı anlaşılsın
-    # Örnek Anahtar: "10:20", "14:00", "18:15"
-    su_an_saat_dakika = simdi.strftime("%H:%M") 
-    
-    # --- 4. FIREBASE KAYDI ---
     doc_ref = db.collection(u'market_history').document(bugun_tarih)
     
-    # Veriyi SAAT:DAKİKA anahtarı altına gömüyoruz
     kayit = {
         u'hourly': {
             su_an_saat_dakika: veri_sozlugu
@@ -71,7 +91,7 @@ try:
     
     doc_ref.set(kayit, merge=True)
     
-    print(f"[{bugun_tarih} - {su_an_saat_dakika}] Veriler TAM İSİM formatında başarıyla kaydedildi.")
+    print(f"[{bugun_tarih} - {su_an_saat_dakika}] Tüm veriler (Ons dahil) TL olarak kaydedildi.")
 
 except Exception as e:
-    print(f"HATA: {e}")
+    print(f"HATA OLUŞTU: {e}")
