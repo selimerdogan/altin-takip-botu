@@ -1,37 +1,26 @@
+import pandas as pd
 import requests
 import firebase_admin
 from firebase_admin import credentials, firestore
 from datetime import datetime
 import sys
 import os
-import json
 
 # --- 1. AYARLAR ---
-# İki farklı kaynaktan JSON çekeceğiz
-url_doviz = "https://api.genelpara.com/embed/doviz.json"
-url_altin = "https://api.genelpara.com/embed/altin.json"
+# Kaynak: Hürriyet Bigpara (Daha güvenilir ve robot engeli az)
+url_altin = "https://bigpara.hurriyet.com.tr/altin/"
+url_dolar = "https://bigpara.hurriyet.com.tr/doviz/dolar/"
 
+# Tarayıcı gibi görünmek için başlıklar
 headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
 }
 
-# Kod Haritası: API'den gelen kısaltmaları İnsan Diline çevirir
-ISIM_HARITASI = {
-    "GA": "Gram Altın",
-    "C": "Çeyrek Altın",
-    "Y": "Yarım Altın",
-    "T": "Tam Altın",
-    "CUM": "Cumhuriyet Altını",
-    "ATA": "Ata Altın",
-    "ONS": "Ons Altın",
-    "22": "22 Ayar Bilezik", # Bazen veri gelmeyebilir
-    "14": "14 Ayar Altın",   # Bazen veri gelmeyebilir
-    "GUM": "Gümüş"
-}
-
-# Firebase Başlatma (Hata Yönetimi ile)
+# --- FIREBASE BAĞLANTISI ---
 if not os.path.exists("serviceAccountKey.json"):
-    print("HATA: Anahtar dosyası (serviceAccountKey.json) yok!")
+    print("HATA: serviceAccountKey.json dosyası bulunamadı!")
     sys.exit(1)
 
 try:
@@ -43,62 +32,100 @@ except Exception as e:
     print(f"HATA: Firebase bağlantısı kurulamadı. {e}")
     sys.exit(1)
 
+# --- YARDIMCI FONKSİYONLAR ---
 def metni_sayiya_cevir(metin):
+    """
+    Bigpara'dan gelen "2.950,50 TL" veya "1.200" verisini temizler.
+    """
     try:
-        # Gelen veri zaten string formatında sayı olabilir "2950.12"
-        return float(str(metin).strip())
+        metin = str(metin)
+        # TL, Dolar, %, ok işaretleri ve boşlukları temizle
+        temiz = metin.replace('TL', '').replace('USD', '').replace('%', '').strip()
+        # Binlik ayracı noktayı sil, ondalık virgülü nokta yap
+        # Örnek: 2.950,50 -> 2950,50 -> 2950.50
+        sayi = float(temiz.replace('.', '').replace(',', '.'))
+        return sayi
     except:
         return 0.0
 
+def ismi_temizle(isim):
+    """
+    İsimlerdeki gereksiz etiketleri atar.
+    """
+    return isim.strip()
+
+# --- ANA İŞLEM ---
 try:
-    print("--- API VERİ ÇEKME MODU BAŞLADI ---")
+    print("--- BIGPARA VERİ ÇEKME MODU ---")
+
+    # 1. GÜNCEL DOLAR KURUNU AL (ONS Çevirisi İçin)
+    print("Dolar kuru alınıyor...")
+    resp_dolar = requests.get(url_dolar, headers=headers, timeout=20)
     
-    # 1. DOLAR KURUNU AL
-    resp_doviz = requests.get(url_doviz, headers=headers, timeout=10)
-    if resp_doviz.status_code != 200:
-        raise Exception("Döviz servisine ulaşılamadı.")
-        
-    json_doviz = resp_doviz.json()
-    # Genelpara USD verisi
-    dolar_satis = json_doviz.get('USD', {}).get('satis')
-    guncel_dolar = metni_sayiya_cevir(dolar_satis)
-    print(f"Dolar Kuru: {guncel_dolar} TL")
+    # Bigpara Dolar sayfasında genellikle üstteki büyük kutuda veya tabloda veri vardır.
+    # Tablo yöntemi en garantisidir.
+    dolar_df_list = pd.read_html(resp_dolar.text)
+    
+    # Genellikle sayfadaki 0. veya 1. tablo ana veridir.
+    # Bigpara Dolar sayfasında 'Satış' sütunu genellikle 2. sıradadır (0:İsim, 1:Alış, 2:Satış)
+    df_dolar = dolar_df_list[0]
+    
+    # Tablodaki ilk satırın Satış fiyatını al (Genellikle Dolar sayfası olduğu için ilk satır dolardır)
+    dolar_satis_raw = df_dolar.iloc[0, 2] 
+    guncel_dolar = metni_sayiya_cevir(dolar_satis_raw)
+    
+    print(f"Güncel Dolar Kuru: {guncel_dolar} TL")
 
     # 2. ALTIN VERİLERİNİ AL
-    resp_altin = requests.get(url_altin, headers=headers, timeout=10)
-    if resp_altin.status_code != 200:
-        raise Exception("Altın servisine ulaşılamadı.")
-        
-    json_altin = resp_altin.json()
+    print("Altın verileri alınıyor...")
+    resp_altin = requests.get(url_altin, headers=headers, timeout=20)
+    
+    # Sayfadaki tabloları oku
+    altin_df_list = pd.read_html(resp_altin.text)
+    
+    # Bigpara altın sayfasındaki ana tablo genellikle en büyüktür (satır sayısı en fazla olan)
+    # Garanti olsun diye en uzun tabloyu buluyoruz.
+    altin_tablosu = max(altin_df_list, key=len)
+    
+    # Bigpara Tablo Yapısı Genellikle:
+    # 0: Altın Türü, 1: Alış, 2: Satış, 3: Saat vs...
+    # Biz 0 (İsim) ve 2 (Satış) sütunlarını alacağız.
+    df = altin_tablosu.iloc[:, [0, 2]]
+    df.columns = ["isim", "fiyat"]
     
     veri_sozlugu = {}
     
-    # API'den gelen karmaşık listeyi dönüyoruz
-    for kod, bilgiler in json_altin.items():
-        # Sadece bizim haritamızda olanları alalım (Gereksizleri at)
-        if kod in ISIM_HARITASI:
-            guzel_isim = ISIM_HARITASI[kod]
-            satis_fiyati = metni_sayiya_cevir(bilgiler.get('satis'))
+    for index, satir in df.iterrows():
+        ham_isim = str(satir['isim'])
+        ham_fiyat = str(satir['fiyat'])
+        
+        # Sadece anlamlı verileri al (Başlık satırlarını atla)
+        if "Alış" in ham_isim or "Satış" in ham_isim:
+            continue
             
-            # Ons Altın Kontrolü (Genellikle Dolar gelir)
-            if kod == "ONS":
-                # Eğer 5000'den küçükse muhtemelen dolardır, TL'ye çevir
-                if satis_fiyati < 5000:
-                     tl_karsiligi = satis_fiyati * guncel_dolar
-                     veri_sozlugu[guzel_isim] = round(tl_karsiligi, 2)
-                     print(f"Ons Altın TL'ye çevrildi: {veri_sozlugu[guzel_isim]}")
-                else:
-                    # Zaten TL gelmişse (bazı API'ler TL verir)
-                    veri_sozlugu[guzel_isim] = satis_fiyati
+        isim = ismi_temizle(ham_isim)
+        fiyat = metni_sayiya_cevir(ham_fiyat)
+        
+        # ONS ALTIN KONTROLÜ
+        # Bigpara'da Ons genellikle "Ons Altın" olarak geçer ve Dolar cinsindendir.
+        if "Ons" in isim:
+            # Dolar mı TL mi olduğunu anlamak için fiyata bakabiliriz
+            # Eğer fiyat 5000'den küçükse Dolardır (Çünkü Ons 2600$ civarı, TL olsa 90.000 olur)
+            if fiyat < 10000: 
+                tl_karsiligi = fiyat * guncel_dolar
+                veri_sozlugu[isim] = round(tl_karsiligi, 2)
+                print(f"{isim} (Dolar) -> TL'ye çevrildi: {veri_sozlugu[isim]}")
             else:
-                veri_sozlugu[guzel_isim] = satis_fiyati
+                veri_sozlugu[isim] = fiyat
+        else:
+            veri_sozlugu[isim] = fiyat
 
-    print(f"Toplam {len(veri_sozlugu)} altın türü işlendi.")
+    print(f"Toplam {len(veri_sozlugu)} adet veri işlendi.")
 
     # 3. FIREBASE KAYDI
     simdi = datetime.now()
     bugun_tarih = simdi.strftime("%Y-%m-%d")
-    su_an_saat_dakika = simdi.strftime("%H:%M") # Örn: 10:20
+    su_an_saat_dakika = simdi.strftime("%H:%M")
     
     doc_ref = db.collection(u'market_history').document(bugun_tarih)
     
@@ -109,8 +136,11 @@ try:
     }
     
     doc_ref.set(kayit, merge=True)
-    print(f"✅ BAŞARILI: [{bugun_tarih} - {su_an_saat_dakika}] Veriler kaydedildi.")
+    print(f"✅ BAŞARILI: [{bugun_tarih} - {su_an_saat_dakika}] Veriler Bigpara üzerinden kaydedildi.")
 
 except Exception as e:
-    print(f"❌ KRİTİK HATA: {e}")
+    # Hatanın detayını yazdır ki loglarda görelim
+    print("❌ KRİTİK HATA DETAYI:")
+    print(e)
+    # Hata oluşursa programı durdur (GitHub kırmızı X versin)
     sys.exit(1)
