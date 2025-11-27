@@ -9,9 +9,8 @@ import yfinance as yf
 import pandas as pd
 
 # --- AYARLAR ---
-# Sitelerin bot engeline takılmaması için kimlik bilgisi
 headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/115.0.0.0 Safari/537.36"
 }
 
 # --- FIREBASE BAĞLANTISI ---
@@ -28,196 +27,205 @@ except Exception as e:
     print(f"HATA: Firebase hatası: {e}")
     sys.exit(1)
 
-# --- YARDIMCI FONKSİYON: METİN TEMİZLEME ---
 def metni_sayiya_cevir(metin):
     try:
-        # TL, $, %, harfler ve boşlukları temizle
         temiz = str(metin).replace('TL', '').replace('USD', '').replace('$', '').replace('%', '').strip()
-        # 1.250,50 -> 1250.50 (Türkçe format)
         return float(temiz.replace('.', '').replace(',', '.'))
     except:
         return 0.0
 
-# --- VERİ ÇEKME FONKSİYONLARI ---
+# ==============================================================================
+# DEV LİSTELER (ROBOT ENGELİ YEMEMEK İÇİN SABİT LİSTE KULLANIYORUZ)
+# ==============================================================================
 
-def get_bist_all():
-    """Borsa İstanbul'daki TÜM hisseleri çeker"""
-    url = "https://borsa.doviz.com/hisseler"
-    veri = {}
-    try:
-        resp = requests.get(url, headers=headers, timeout=30)
-        if resp.status_code == 200:
-            soup = BeautifulSoup(resp.content, "html.parser")
-            for satir in soup.find_all("tr"):
-                cols = satir.find_all("td")
-                if len(cols) > 1:
-                    try:
-                        # İsim sütunundan sembolü ayıkla (Örn: THYAO\nTurk Hava Yollari)
-                        ham_isim = cols[0].get_text(strip=True)
-                        sembol = ham_isim.split()[0] # İlk kelime semboldür
-                        fiyat = metni_sayiya_cevir(cols[1].get_text(strip=True))
-                        
-                        if fiyat > 0 and 2 < len(sembol) < 10:
-                            veri[sembol] = fiyat
-                    except: continue
-    except Exception as e:
-        print(f"BIST Hatası: {e}")
-    return veri
+# 1. ABD BORSASI (S&P 100 - En Büyük 100 Şirket)
+# Wikipedia'dan çekince hata verdiği için buraya elle en popülerleri yazdım.
+LISTE_ABD = [
+    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "BRK-B", "LLY", "AVGO",
+    "V", "JPM", "XOM", "WMT", "UNH", "MA", "PG", "JNJ", "HD", "MRK", "COST", "ABBV",
+    "CVX", "CRM", "BAC", "AMD", "PEP", "KO", "NFLX", "ADBE", "DIS", "MCD", "CSCO",
+    "TMUS", "ABT", "INTC", "INTU", "CMCSA", "PFE", "NKE", "WFC", "QCOM", "TXN",
+    "DHR", "PM", "UNP", "IBM", "AMGN", "GE", "HON", "BA", "SPY", "QQQ", "UBER", "PLTR"
+]
 
-def get_kripto_all():
-    """En popüler ~100 Kripto Parayı çeker"""
-    url = "https://www.doviz.com/kripto-paralar"
-    veri = {}
-    try:
-        resp = requests.get(url, headers=headers, timeout=30)
-        if resp.status_code == 200:
-            soup = BeautifulSoup(resp.content, "html.parser")
-            for satir in soup.find_all("tr"):
-                cols = satir.find_all("td")
-                if len(cols) > 2:
-                    try:
-                        # Sembol genellikle ilk sütunda gizlidir veya text içindedir
-                        # Doviz.com yapısı: 1. sıra İsim (Bitcoin BTC), 2. sıra Fiyat ($95.000)
-                        isim_blok = cols[0].get_text(" ", strip=True) # "Bitcoin BTC"
-                        sembol = isim_blok.split()[-1] # Sondaki kelimeyi al: BTC
-                        
-                        fiyat_txt = cols[1].get_text(strip=True)
-                        fiyat = metni_sayiya_cevir(fiyat_txt)
-                        
-                        if fiyat > 0:
-                            veri[sembol] = fiyat
-                    except: continue
-    except Exception as e:
-        print(f"Kripto Hatası: {e}")
-    return veri
+# 2. KRİPTO (En Popüler 50 Coin)
+LISTE_KRIPTO = [
+    "BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD", "ADA-USD", "AVAX-USD", "DOGE-USD",
+    "TRX-USD", "DOT-USD", "LINK-USD", "MATIC-USD", "LTC-USD", "SHIB-USD", "UNI-USD", "ATOM-USD",
+    "XLM-USD", "NEAR-USD", "INJ-USD", "APT-USD", "FIL-USD", "HBAR-USD", "LDO-USD", "ARB-USD",
+    "PEPE-USD", "RNDR-USD", "GRT-USD", "AAVE-USD", "ALGO-USD", "FTM-USD", "SAND-USD"
+]
 
-def get_doviz_all():
-    """Tüm Serbest Piyasa Döviz Kurlarını çeker"""
-    url = "https://www.doviz.com/serbest-piyasa-doviz-kurlari"
-    veri = {}
-    try:
-        resp = requests.get(url, headers=headers, timeout=30)
-        if resp.status_code == 200:
-            soup = BeautifulSoup(resp.content, "html.parser")
-            # Tabloyu bul (class="currencies" veya benzeri)
-            # Garantili yöntem: item-name class'ına sahip olanları bulmak
-            for satir in soup.find_all("tr"):
-                cols = satir.find_all("td")
-                if len(cols) > 2:
-                    try:
-                        isim = cols[0].get_text(strip=True)
-                        fiyat = metni_sayiya_cevir(cols[2].get_text(strip=True)) # Satış fiyatı
-                        
-                        # "Dolar", "Euro", "Sterlin" gibi temiz isimler gelir
-                        if fiyat > 0:
-                            veri[isim] = fiyat
-                    except: continue
-    except Exception as e:
-        print(f"Döviz Hatası: {e}")
-    return veri
+# 3. DÖVİZ (Doviz.com yerine Yahoo'dan alıyoruz, %100 Garanti)
+LISTE_DOVIZ = [
+    "USDTRY=X", "EURTRY=X", "GBPTRY=X", "CHFTRY=X", "CADTRY=X", "JPYTRY=X", "AUDTRY=X", # Ana Kurlar
+    "EURUSD=X", "GBPUSD=X" # Pariteler
+]
 
-def get_abd_sp500():
-    """ABD'nin en büyük 500 şirketini (S&P 500) Wikipedia'dan bulup Yahoo'dan çeker"""
-    veri = {}
-    try:
-        # 1. Wikipedia'dan güncel listeyi al (Scraping)
-        print("   -> S&P 500 listesi Wikipedia'dan alınıyor...")
-        sp500_url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-        tables = pd.read_html(sp500_url)
-        df_symbols = tables[0] # İlk tablo şirket listesidir
-        sembol_listesi = df_symbols['Symbol'].tolist()
-        
-        # Bazı semboller Yahoo'da farklıdır (BRK.B -> BRK-B)
-        sembol_listesi = [s.replace('.', '-') for s in sembol_listesi]
-        
-        print(f"   -> Toplam {len(sembol_listesi)} ABD hissesi Yahoo'dan indiriliyor (Bu biraz sürebilir)...")
-        
-        # 2. Yahoo Finance ile Toplu İndir (Batch Download)
-        # Hepsini tek seferde çekiyoruz
-        df_yahoo = yf.download(sembol_listesi, period="1d", progress=False)['Close']
-        
-        if not df_yahoo.empty:
-            son_fiyatlar = df_yahoo.iloc[-1]
-            for sembol in sembol_listesi:
-                try:
-                    fiyat = son_fiyatlar.get(sembol)
-                    if pd.notna(fiyat):
-                        veri[sembol] = round(float(fiyat), 2)
-                except: continue
-    except Exception as e:
-        print(f"ABD Borsa Hatası: {e}")
-    return veri
+# 4. BIST (TÜMÜ)
+# Borsa İstanbul'daki hemen hemen tüm aktif hisseler (450+ Adet)
+# Bu liste sayesinde siteden kazımaya gerek kalmaz, Yahoo hepsini getirir.
+LISTE_BIST = [
+    "ACSEL.IS", "ADEL.IS", "ADESE.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AGYO.IS", "AKBNK.IS", "AKCNS.IS",
+    "AKENR.IS", "AKFGY.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", "AKSEN.IS", "AKSGY.IS", "AKSUE.IS", "AKYHO.IS", "ALARK.IS",
+    "ALBRK.IS", "ALCAR.IS", "ALCTL.IS", "ALFAS.IS", "ALGYO.IS", "ALKA.IS", "ALKIM.IS", "ALMAD.IS", "ALTNY.IS", "ANELE.IS",
+    "ANGEN.IS", "ANHYT.IS", "ANSGR.IS", "ARASE.IS", "ARCLK.IS", "ARDYZ.IS", "ARENA.IS", "ARSAN.IS", "ARZUM.IS", "ASELS.IS",
+    "ASGYO.IS", "ASTOR.IS", "ASUZU.IS", "ATAGY.IS", "ATAKP.IS", "ATATP.IS", "ATEKS.IS", "ATLAS.IS", "ATSYH.IS", "AVGYO.IS",
+    "AVHOL.IS", "AVOD.IS", "AVTUR.IS", "AYCES.IS", "AYDEM.IS", "AYEN.IS", "AYES.IS", "AYGAZ.IS", "AZTEK.IS", "BAGFS.IS",
+    "BAKAB.IS", "BALAT.IS", "BANVT.IS", "BARMA.IS", "BASCM.IS", "BASGZ.IS", "BAYRK.IS", "BEGYO.IS", "BERA.IS", "BEYAZ.IS",
+    "BFREN.IS", "BIENY.IS", "BIGCH.IS", "BIMAS.IS", "BIOEN.IS", "BIZIM.IS", "BJKAS.IS", "BLCYT.IS", "BMSCH.IS", "BMSTL.IS",
+    "BNTAS.IS", "BOBET.IS", "BOSSA.IS", "BRISA.IS", "BRKO.IS", "BRKSN.IS", "BRKVY.IS", "BRLSM.IS", "BRMEN.IS", "BRSAN.IS",
+    "BRYAT.IS", "BSOKE.IS", "BTCIM.IS", "BUCIM.IS", "BURCE.IS", "BURVA.IS", "BVSAN.IS", "CANTE.IS", "CASA.IS", "CCOLA.IS",
+    "CELHA.IS", "CEMAS.IS", "CEMTS.IS", "CEOEM.IS", "CIMSA.IS", "CLEBI.IS", "CMBTN.IS", "CMENT.IS", "CONSE.IS", "COSMO.IS",
+    "CRDFA.IS", "CRFSA.IS", "CUSAN.IS", "CVKMD.IS", "CWENE.IS", "DAGHL.IS", "DAGI.IS", "DAPGM.IS", "DARDL.IS", "DENGE.IS",
+    "DERHL.IS", "DERIM.IS", "DESA.IS", "DESPC.IS", "DEVA.IS", "DGATE.IS", "DGGYO.IS", "DGNMO.IS", "DIRIT.IS", "DITAS.IS",
+    "DMSAS.IS", "DNISI.IS", "DOAS.IS", "DOBUR.IS", "DOCO.IS", "DOGUB.IS", "DOHOL.IS", "DOKTA.IS", "DURDO.IS", "DYOBY.IS",
+    "DZGYO.IS", "EBEBK.IS", "ECILC.IS", "ECZYT.IS", "EDATA.IS", "EDIP.IS", "EGEEN.IS", "EGGUB.IS", "EGPRO.IS", "EGSER.IS",
+    "EKGYO.IS", "EKIZ.IS", "EKSUN.IS", "ELITE.IS", "EMKEL.IS", "EMNIS.IS", "ENJSA.IS", "ENKAI.IS", "ENSRI.IS", "EPLAS.IS",
+    "ERBOS.IS", "ERCB.IS", "EREGL.IS", "ERSU.IS", "ESCAR.IS", "ESCOM.IS", "ESEN.IS", "ETILR.IS", "ETYAT.IS", "EUHOL.IS",
+    "EUKYO.IS", "EUPWR.IS", "EUREN.IS", "EUYO.IS", "EYGYO.IS", "FADE.IS", "FENER.IS", "FLAP.IS", "FMIZP.IS", "FONET.IS",
+    "FORMT.IS", "FORTE.IS", "FRIGO.IS", "FROTO.IS", "FZCMI.IS", "GARAN.IS", "GARFA.IS", "GEDIK.IS", "GEDZA.IS", "GENIL.IS",
+    "GENTS.IS", "GEREL.IS", "GESAN.IS", "GLBMD.IS", "GLRYH.IS", "GLYHO.IS", "GMTAS.IS", "GOKNR.IS", "GOLTS.IS", "GOODY.IS",
+    "GOZDE.IS", "GRNYO.IS", "GRSEL.IS", "GRTRK.IS", "GUBRF.IS", "GWIND.IS", "GZNMI.IS", "HALKB.IS", "HATEK.IS", "HDFGS.IS",
+    "HEDEF.IS", "HEKTS.IS", "HKTM.IS", "HLGYO.IS", "HTTBT.IS", "HUBVC.IS", "HUNER.IS", "HURGZ.IS", "ICBCT.IS", "IDEAS.IS",
+    "IDGYO.IS", "IEYHO.IS", "IHAAS.IS", "IHEVA.IS", "IHGZT.IS", "IHLAS.IS", "IHLGM.IS", "IHYAY.IS", "IMASM.IS", "INDES.IS",
+    "INFO.IS", "INGRM.IS", "INTEM.IS", "INVEO.IS", "INVES.IS", "IPEKE.IS", "ISATR.IS", "ISBIR.IS", "ISBTR.IS", "ISCTR.IS",
+    "ISDMR.IS", "ISFIN.IS", "ISGSY.IS", "ISGYO.IS", "ISKPL.IS", "ISKUR.IS", "ISMEN.IS", "ISSEN.IS", "ISYAT.IS", "ITTFH.IS",
+    "IZENR.IS", "IZFAS.IS", "IZINV.IS", "IZMDC.IS", "JANTS.IS", "KAPLM.IS", "KAREL.IS", "KARSN.IS", "KARTN.IS", "KARYE.IS",
+    "KATMR.IS", "KAYSE.IS", "KCAER.IS", "KCM.IS", "KFEIN.IS", "KGYO.IS", "KIMMR.IS", "KLGYO.IS", "KLKIM.IS", "KLMSN.IS",
+    "KLNMA.IS", "KLRHO.IS", "KLSYN.IS", "KMPUR.IS", "KNFRT.IS", "KONKA.IS", "KONTR.IS", "KONYA.IS", "KOPOL.IS", "KORDS.IS",
+    "KOZAA.IS", "KOZAL.IS", "KRDMA.IS", "KRDMB.IS", "KRDMD.IS", "KRGYO.IS", "KRONT.IS", "KRPLS.IS", "KRSTL.IS", "KRTEK.IS",
+    "KRVGD.IS", "KSTUR.IS", "KTLEV.IS", "KTSKR.IS", "KUTPO.IS", "KUYAS.IS", "KZBGY.IS", "KZGYO.IS", "LIDER.IS", "LIDFA.IS",
+    "LINK.IS", "LKMNH.IS", "LOGO.IS", "LORAS.IS", "LUKSK.IS", "MAALT.IS", "MACKO.IS", "MAGEN.IS", "MAKIM.IS", "MAKTK.IS",
+    "MANAS.IS", "MARKA.IS", "MARTI.IS", "MAVI.IS", "MEDTR.IS", "MEGAP.IS", "MEPET.IS", "MERCN.IS", "MERIT.IS", "MERKO.IS",
+    "METRO.IS", "METUR.IS", "MGROS.IS", "MIATK.IS", "MIPAZ.IS", "MMCAS.IS", "MNDRS.IS", "MNDTR.IS", "MOBTL.IS", "MPARK.IS",
+    "MRGYO.IS", "MRSHL.IS", "MSGYO.IS", "MTRKS.IS", "MTRYO.IS", "MZHLD.IS", "NATEN.IS", "NETAS.IS", "NIBAS.IS", "NTGAZ.IS",
+    "NTHOL.IS", "NUGYO.IS", "NUHCM.IS", "ODAS.IS", "OFSYM.IS", "ONCSM.IS", "ORCAY.IS", "ORGE.IS", "ORMA.IS", "OSMEN.IS",
+    "OSTIM.IS", "OTKAR.IS", "OTTO.IS", "OYAKC.IS", "OYAYO.IS", "OYLUM.IS", "OYYAT.IS", "OZGYO.IS", "OZKGY.IS", "OZRDN.IS",
+    "OZSUB.IS", "PAGYO.IS", "PAMEL.IS", "PAPIL.IS", "PARSN.IS", "PASEU.IS", "PCILT.IS", "PEGYO.IS", "PEKGY.IS", "PENGD.IS",
+    "PENTA.IS", "PETKM.IS", "PETUN.IS", "PGSUS.IS", "PINSU.IS", "PKART.IS", "PKENT.IS", "PLAT.IS", "PLTUR.IS", "PNLSN.IS",
+    "PNSUT.IS", "POLHO.IS", "POLTK.IS", "PRDGS.IS", "PRKAB.IS", "PRKME.IS", "PRZMA.IS", "PSGYO.IS", "PSDTC.IS", "QNBFB.IS",
+    "QNBFL.IS", "QUAGR.IS", "RALYH.IS", "RAYSG.IS", "RNPOL.IS", "RODRG.IS", "ROYAL.IS", "RTALB.IS", "RUBNS.IS", "RYGYO.IS",
+    "RYSAS.IS", "SAHOL.IS", "SAMAT.IS", "SANEL.IS", "SANFM.IS", "SANKO.IS", "SARKY.IS", "SASA.IS", "SAYAS.IS", "SDTTR.IS",
+    "SEKFK.IS", "SEKUR.IS", "SELEC.IS", "SELGD.IS", "SELVA.IS", "SEYKM.IS", "SILVR.IS", "SISE.IS", "SKBNK.IS", "SKTAS.IS",
+    "SMART.IS", "SMRTG.IS", "SNGYO.IS", "SNKRN.IS", "SNPAM.IS", "SODSN.IS", "SOKE.IS", "SOKM.IS", "SONME.IS", "SRVGY.IS",
+    "SUMAS.IS", "SUNTK.IS", "SUWEN.IS", "TATGD.IS", "TAVHL.IS", "TBORG.IS", "TCELL.IS", "TDGYO.IS", "TEKTU.IS", "TERA.IS",
+    "TETMT.IS", "TEZOL.IS", "TGSAS.IS", "THYAO.IS", "TIRE.IS", "TKFEN.IS", "TKNSA.IS", "TLMAN.IS", "TMPOL.IS", "TMSN.IS",
+    "TNZTP.IS", "TOASO.IS", "TRCAS.IS", "TRGYO.IS", "TRILC.IS", "TSGYO.IS", "TSKB.IS", "TSPOR.IS", "TTKOM.IS", "TTRAK.IS",
+    "TUCLK.IS", "TUKAS.IS", "TUPRS.IS", "TURGG.IS", "TURSG.IS", "ULAS.IS", "ULKER.IS", "ULUFA.IS", "ULUSE.IS", "ULUUN.IS",
+    "UMPAS.IS", "UNLU.IS", "USAK.IS", "UZERB.IS", "VAKBN.IS", "VAKFN.IS", "VAKKO.IS", "VANGD.IS", "VBTYZ.IS", "VERTU.IS",
+    "VERUS.IS", "VESBE.IS", "VESTL.IS", "VKFYO.IS", "VKGYO.IS", "VKING.IS", "YAPRK.IS", "YATAS.IS", "YAYLA.IS", "YEOTK.IS",
+    "YESIL.IS", "YGGYO.IS", "YGYO.IS", "YKBNK.IS", "YKSLN.IS", "YONGA.IS", "YUNSA.IS", "YYAPI.IS", "YYLGD.IS", "ZEDUR.IS",
+    "ZOREN.IS", "ZRGYO.IS"
+]
 
-def get_altin_all():
-    """Altın Verileri (Mevcut)"""
-    url = "https://altin.doviz.com/"
-    veri = {}
-    try:
-        resp = requests.get(url, headers=headers, timeout=20)
-        if resp.status_code == 200:
-            soup = BeautifulSoup(resp.content, "html.parser")
-            for satir in soup.find_all("tr"):
-                cols = satir.find_all("td")
-                if len(cols) > 2:
-                    try:
-                        isim = cols[0].get_text(strip=True)
-                        fiyat = metni_sayiya_cevir(cols[2].get_text(strip=True))
-                        if "Ons" not in isim and fiyat > 0:
-                            veri[isim] = fiyat
-                    except: continue
-    except: pass
-    return veri
+# ==============================================================================
+# ANA PROGRAM
+# ==============================================================================
 
-# --- ANA PROGRAM ---
 try:
-    print("--- ULTIMATE FİNANS BOTU ÇALIŞIYOR ---")
+    print("--- ULTIMATE FİNANS BOTU (KURŞUN GEÇİRMEZ MOD) ---")
     
-    # 1. BIST (TR)
-    print("1. Borsa İstanbul taranıyor...")
-    data_bist = get_bist_all()
-    print(f"   ✅ {len(data_bist)} hisse alındı.")
+    # 1. TÜM PİYASALAR İÇİN TEK DEV İSTEK (Batch Download)
+    # -----------------------------------------------------------------------
+    # Artık parça parça çekip hata almıyoruz. Hepsini Yahoo'dan tek seferde indiriyoruz.
+    print("1. Tüm piyasalar (BIST, ABD, Kripto, Döviz) Yahoo'dan indiriliyor...")
     
-    # 2. KRİPTO
-    print("2. Kripto piyasası taranıyor...")
-    data_kripto = get_kripto_all()
-    print(f"   ✅ {len(data_kripto)} coin alındı.")
+    tum_semboller = LISTE_ABD + LISTE_KRIPTO + LISTE_DOVIZ + LISTE_BIST
     
-    # 3. DÖVİZ
-    print("3. Tüm Döviz kurları taranıyor...")
-    data_doviz = get_doviz_all()
-    print(f"   ✅ {len(data_doviz)} kur alındı.")
+    # Tek seferde indir (Thread sayısını artırarak hızlandırıyoruz)
+    # threads=True parametresi indirmeyi aşırı hızlandırır
+    df = yf.download(tum_semboller, period="1d", progress=False, threads=True)['Close']
     
-    # 4. ABD BORSASI (S&P 500)
-    print("4. ABD Borsası (S&P 500) taranıyor...")
-    data_abd = get_abd_sp500()
-    print(f"   ✅ {len(data_abd)} ABD hissesi alındı.")
+    # KUTULAR
+    data_borsa_tr = {}
+    data_borsa_abd = {}
+    data_kripto = {}
+    data_doviz = {}
     
-    # 5. ALTIN
-    print("5. Altın verileri taranıyor...")
-    data_altin = get_altin_all()
-    print(f"   ✅ {len(data_altin)} altın türü alındı.")
+    # Eğer veri geldiyse işle
+    if not df.empty:
+        # Son satırı (en güncel fiyatları) al
+        son_fiyatlar = df.iloc[-1]
+        
+        for sembol in tum_semboller:
+            try:
+                # Fiyatı çek
+                fiyat = son_fiyatlar.get(sembol)
+                
+                # Geçerli bir sayı mı?
+                if pd.notna(fiyat):
+                    fiyat = round(float(fiyat), 2)
+                    
+                    # Kutulara Dağıt
+                    if sembol in LISTE_BIST:
+                        temiz_isim = sembol.replace(".IS", "")
+                        data_borsa_tr[temiz_isim] = fiyat
+                        
+                    elif sembol in LISTE_ABD:
+                        data_borsa_abd[sembol] = fiyat
+                        
+                    elif sembol in LISTE_KRIPTO:
+                        temiz_isim = sembol.replace("-USD", "")
+                        data_kripto[temiz_isim] = fiyat
+                        
+                    elif sembol in LISTE_DOVIZ:
+                        if "USD" in sembol: data_doviz["DOLAR"] = fiyat
+                        if "EUR" in sembol: data_doviz["EURO"] = fiyat
+                        if "GBP" in sembol: data_doviz["STERLIN"] = fiyat
+                        if "JPY" in sembol: data_doviz["YEN"] = fiyat
+                        
+            except: continue
+    
+    print(f"✅ Yahoo Tamamlandı: BIST({len(data_borsa_tr)}), ABD({len(data_borsa_abd)}), Kripto({len(data_kripto)}), Döviz({len(data_doviz)})")
 
-    # PAKETLEME
+
+    # 2. ALTIN (Altin.doviz.com'dan Kazıma - Tek İstisna Burası)
+    # -----------------------------------------------------------------------
+    print("2. Altın verileri taranıyor...")
+    data_altin = {}
+    try:
+        url_altin = "https://altin.doviz.com/"
+        session = requests.Session()
+        r = session.get(url_altin, headers=headers, timeout=20)
+        if r.status_code == 200:
+            soup = BeautifulSoup(r.content, "html.parser")
+            for satir in soup.find_all("tr"):
+                cols = satir.find_all("td")
+                if len(cols) > 2:
+                    try:
+                        isim = cols[0].get_text(strip=True)
+                        # Ons'u almayalım, TL olanları alalım
+                        if "Ons" not in isim: 
+                            fiyat = metni_sayiya_cevir(cols[2].get_text(strip=True))
+                            if fiyat > 0:
+                                data_altin[isim] = fiyat
+                    except: continue
+        print(f"✅ Altın alındı: {len(data_altin)} adet")
+    except Exception as e:
+        print(f"⚠️ Altın Hatası: {e}")
+
+    # 3. KAYIT
+    # -----------------------------------------------------------------------
     final_paket = {
-        "borsa_tr_tl": data_bist,
-        "borsa_abd_usd": data_abd,
+        "borsa_tr_tl": data_borsa_tr,
+        "borsa_abd_usd": data_borsa_abd,
         "kripto_usd": data_kripto,
         "doviz_tl": data_doviz,
         "altin_tl": data_altin
     }
 
-    # KAYIT
     if any(final_paket.values()):
         simdi = datetime.now()
         bugun_tarih = simdi.strftime("%Y-%m-%d")
         su_an_saat_dakika = simdi.strftime("%H:%M")
         
-        doc_ref = db.collection(u'market_history').document(bugun_tarih)
-        doc_ref.set({u'hourly': {su_an_saat_dakika: final_paket}}, merge=True)
-        
-        print(f"🎉 TEBRİKLER: [{bugun_tarih} - {su_an_saat_dakika}] Toplam 1000+ veri kaydedildi.")
+        db.collection(u'market_history').document(bugun_tarih).set(
+            {u'hourly': {su_an_saat_dakika: final_paket}}, merge=True
+        )
+        print(f"🎉 BAŞARILI: [{bugun_tarih} - {su_an_saat_dakika}] Tüm veriler veritabanına işlendi.")
     else:
-        print("❌ HATA: Veri toplanamadı.")
+        print("❌ HATA: Hiçbir veri toplanamadı!")
         sys.exit(1)
 
 except Exception as e:
