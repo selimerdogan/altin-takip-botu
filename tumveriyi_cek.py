@@ -35,10 +35,10 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# DEV LİSTELER (GÜNCELLENMİŞ VE TEMİZLENMİŞ)
+# DEV LİSTELER (HATALI OLANLAR TEMİZLENDİ)
 # ==============================================================================
 
-# 1. ABD BORSASI (S&P 100 - En Büyük 100 Şirket)
+# 1. ABD BORSASI (S&P 100)
 LISTE_ABD = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "BRK-B", "LLY", "AVGO",
     "V", "JPM", "XOM", "WMT", "UNH", "MA", "PG", "JNJ", "HD", "MRK", "COST", "ABBV",
@@ -47,13 +47,12 @@ LISTE_ABD = [
     "DHR", "PM", "UNP", "IBM", "AMGN", "GE", "HON", "BA", "SPY", "QQQ", "UBER", "PLTR"
 ]
 
-# 2. KRİPTO (Sorunlu olanlar çıkarıldı)
-# MATIC -> POL oldu, eski kodlar temizlendi.
+# 2. KRİPTO (Hata veren RNDR, PEPE, FTM, UNI vb. çıkarıldı)
 LISTE_KRIPTO = [
     "BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD", "ADA-USD", "AVAX-USD", "DOGE-USD",
-    "TRX-USD", "DOT-USD", "LINK-USD", "LTC-USD", "SHIB-USD", "UNI-USD", "ATOM-USD",
-    "XLM-USD", "NEAR-USD", "INJ-USD", "APT-USD", "FIL-USD", "HBAR-USD", "LDO-USD", "ARB-USD",
-    "PEPE-USD", "RNDR-USD", "GRT-USD", "AAVE-USD", "ALGO-USD", "FTM-USD", "SAND-USD"
+    "TRX-USD", "DOT-USD", "LINK-USD", "LTC-USD", "SHIB-USD", "ATOM-USD",
+    "XLM-USD", "NEAR-USD", "INJ-USD", "FIL-USD", "HBAR-USD", "LDO-USD", "ARB-USD",
+    "ALGO-USD", "SAND-USD"
 ]
 
 # 3. DÖVİZ
@@ -62,7 +61,7 @@ LISTE_DOVIZ = [
     "EURUSD=X", "GBPUSD=X"
 ]
 
-# 4. BIST (Hata veren delist olmuş hisseler temizlendi)
+# 4. BIST (Hata verenler ve kapalı hisseler temizlendi)
 LISTE_BIST = [
     "ACSEL.IS", "ADEL.IS", "ADESE.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AGYO.IS", "AKBNK.IS", "AKCNS.IS",
     "AKENR.IS", "AKFGY.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", "AKSEN.IS", "AKSGY.IS", "AKSUE.IS", "AKYHO.IS", "ALARK.IS",
@@ -100,7 +99,7 @@ LISTE_BIST = [
     "MRGYO.IS", "MRSHL.IS", "MSGYO.IS", "MTRKS.IS", "MTRYO.IS", "MZHLD.IS", "NATEN.IS", "NETAS.IS", "NIBAS.IS", "NTGAZ.IS",
     "NTHOL.IS", "NUGYO.IS", "NUHCM.IS", "ODAS.IS", "OFSYM.IS", "ONCSM.IS", "ORCAY.IS", "ORGE.IS", "ORMA.IS", "OSMEN.IS",
     "OSTIM.IS", "OTKAR.IS", "OTTO.IS", "OYAKC.IS", "OYAYO.IS", "OYLUM.IS", "OYYAT.IS", "OZGYO.IS", "OZKGY.IS", "OZRDN.IS",
-    "OZSUB.IS", "PAGYO.IS", "PAMEL.IS", "PAPIL.IS", "PARSN.IS", "PASEU.IS", "PCILT.IS", "PEKGY.IS", "PENGD.IS",
+    "OZSUB.IS", "PAGYO.IS", "PAMEL.IS", "PAPIL.IS", "PARSN.IS", "PASEU.IS", "PCILT.IS", "PENGD.IS",
     "PENTA.IS", "PETKM.IS", "PETUN.IS", "PGSUS.IS", "PINSU.IS", "PKART.IS", "PKENT.IS", "PLTUR.IS", "PNLSN.IS",
     "PNSUT.IS", "POLHO.IS", "POLTK.IS", "PRDGS.IS", "PRKAB.IS", "PRKME.IS", "PRZMA.IS", "PSGYO.IS", "PSDTC.IS",
     "QUAGR.IS", "RALYH.IS", "RAYSG.IS", "RNPOL.IS", "RODRG.IS", "RTALB.IS", "RUBNS.IS", "RYGYO.IS",
@@ -122,15 +121,15 @@ LISTE_BIST = [
 # ==============================================================================
 
 try:
-    print("--- ULTIMATE FİNANS BOTU (FİNAL VERSİYON) ---")
+    print("--- FİNANS BOTU (TEMİZLENMİŞ VERSİYON) ---")
     
     # 1. TÜM PİYASALAR İÇİN TEK DEV İSTEK (Batch Download)
     print("1. Tüm piyasalar (BIST, ABD, Kripto, Döviz) Yahoo'dan indiriliyor...")
     
-    # !!! DÜZELTME BURADA YAPILDI: ABD LİSTESİ EKLENDİ !!!
+    # Tüm sembolleri birleştir (ABD Listesi dahil!)
     tum_semboller = LISTE_ABD + LISTE_KRIPTO + LISTE_DOVIZ + LISTE_BIST
     
-    # auto_adjust=True hatasını önlemek için parametre ekledik
+    # Tek seferde indir (auto_adjust=True ile uyarıyı kapatıyoruz)
     df = yf.download(tum_semboller, period="1d", progress=False, threads=True, auto_adjust=True)['Close']
     
     # KUTULAR
@@ -140,12 +139,15 @@ try:
     data_doviz = {}
     
     if not df.empty:
+        # Son satırı (en güncel fiyatları) al
         son_fiyatlar = df.iloc[-1]
         
         for sembol in tum_semboller:
             try:
+                # Fiyatı çek (Get ile hata vermesini engelle)
                 fiyat = son_fiyatlar.get(sembol)
                 
+                # Fiyat geçerli mi (NaN değil mi?)
                 if pd.notna(fiyat):
                     fiyat = round(float(fiyat), 2)
                     
@@ -214,7 +216,7 @@ try:
         db.collection(u'market_history').document(bugun_tarih).set(
             {u'hourly': {su_an_saat_dakika: final_paket}}, merge=True
         )
-        print(f"🎉 BAŞARILI: [{bugun_tarih} - {su_an_saat_dakika}] Tüm veriler veritabanına işlendi.")
+        print(f"🎉 BAŞARILI: [{bugun_tarih} - {su_an_saat_dakika}] Veriler kaydedildi.")
     else:
         print("❌ HATA: Hiçbir veri toplanamadı!")
         sys.exit(1)
