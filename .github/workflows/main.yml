@@ -1,4 +1,4 @@
-name: Altın Botu Çalıştır
+name: Tum Veri Botunu Çalıştır
 
 on:
   schedule:
@@ -38,4 +38,4 @@ jobs:
           echo "$FIREBASE_KEY" > serviceAccountKey.json
 
       - name: Botu Çalıştır
-        run: python altin_cek.py
+        run: python tumveriyi_cek.py
