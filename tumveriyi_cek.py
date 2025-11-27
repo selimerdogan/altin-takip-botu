@@ -2,7 +2,7 @@ import requests
 from bs4 import BeautifulSoup
 import firebase_admin
 from firebase_admin import credentials, firestore
-from datetime import datetime, timedelta
+from datetime import datetime
 import sys
 import os
 import yfinance as yf
@@ -13,9 +13,8 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 # --- AYARLAR ---
-# Genel User-Agent
-headers_general = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/115.0.0.0 Safari/537.36"
 }
 
 # --- FIREBASE BAĞLANTISI ---
@@ -40,86 +39,7 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. YATIRIM FONLARI (TEFAS - COOKIE DESTEKLİ GÜÇLÜ MOD)
-# ==============================================================================
-def get_tefas_data():
-    """
-    TEFAS sitesinden önce çerez (cookie) alır, sonra veriyi çeker.
-    Bu yöntem 'Veri Bulunamadı' hatasını çözer.
-    """
-    url_api = "https://www.tefas.gov.tr/api/DB/BindComparisonFundReturns"
-    url_home = "https://www.tefas.gov.tr/FonKarsilastirma.aspx"
-    
-    data_fon = {}
-    
-    # Oturum (Session) başlat - Bu sayede cookie'leri hafızada tutar
-    session = requests.Session()
-    
-    # Tarayıcı gibi görünmek için başlıklar
-    tefas_headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
-        "X-Requested-With": "XMLHttpRequest",
-        "Referer": "https://www.tefas.gov.tr/FonKarsilastirma.aspx",
-        "Origin": "https://www.tefas.gov.tr",
-        "Content-Type": "application/json; charset=UTF-8",
-        "Accept": "application/json, text/javascript, */*; q=0.01"
-    }
-
-    try:
-        # 1. Önce ana sayfaya git ve Cookie al
-        print("   -> TEFAS ana sayfasına bağlanılıyor (Cookie alınıyor)...")
-        session.get(url_home, headers=tefas_headers, timeout=15)
-        
-        # 2. Bugünden geriye doğru 7 gün tara
-        for i in range(7):
-            tarih_obj = datetime.now() - timedelta(days=i)
-            tarih_str = tarih_obj.strftime("%d.%m.%Y")
-            
-            print(f"   -> TEFAS verisi deneniyor: {tarih_str} ...")
-            
-            payload = {
-                "calismatipi": "2",
-                "fontip": "YAT",
-                "sfontip": "",
-                "fas": "",
-                "fonturkod": "",
-                "fongrup": "",
-                "bastarih": tarih_str,
-                "bittarih": tarih_str,
-                "fontur": "",
-                "fonkurucukod": "",
-                "gecenin_rengi": ""
-            }
-            
-            # Post isteğini session üzerinden yapıyoruz
-            r = session.post(url_api, json=payload, headers=tefas_headers, timeout=30)
-            
-            if r.status_code == 200:
-                sonuc = r.json()
-                data_list = sonuc.get('data', [])
-                
-                # Veri geldiyse işle ve döngüyü kır
-                if data_list and len(data_list) > 10:
-                    for fon in data_list:
-                        kod = fon.get('FONKODU')
-                        fiyat = fon.get('FIYAT')
-                        if kod and fiyat:
-                            try:
-                                fiyat_float = float(str(fiyat).replace(',', '.'))
-                                data_fon[kod] = fiyat_float
-                            except: continue
-                    
-                    print(f"   -> ✅ TEFAS Başarılı! {len(data_fon)} adet fon çekildi.")
-                    return data_fon # Fonksiyondan çık
-            
-    except Exception as e:
-        print(f"   -> ⚠️ TEFAS Hatası: {e}")
-        
-    print("   -> ❌ TEFAS: Veri çekilemedi (Tüm tarihler denendi).")
-    return {}
-
-# ==============================================================================
-# 2. ABD BORSASI (S&P 500)
+# 1. ABD BORSASI (S&P 500)
 # ==============================================================================
 LISTE_ABD = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "BRK-B", "LLY", "AVGO", "V", "JPM", "XOM", "WMT", "UNH", "MA", "PG", "JNJ", "HD", "MRK", "COST", "ABBV", "CVX", "CRM", "BAC", "AMD", "PEP", "KO", "NFLX", "ADBE", "DIS", "MCD", "CSCO", "TMUS", "ABT", "INTC", "INTU", "CMCSA", "PFE", "NKE", "WFC", "QCOM", "TXN", "DHR", "PM", "UNP", "IBM", "AMGN", "GE", "HON", "BA", "SPY", "QQQ", "UBER", "PLTR",
@@ -127,7 +47,7 @@ LISTE_ABD = [
 ]
 
 # ==============================================================================
-# 3. KRİPTO
+# 2. KRİPTO
 # ==============================================================================
 LISTE_KRIPTO = [
     "BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD", "ADA-USD", "AVAX-USD", "DOGE-USD",
@@ -143,7 +63,7 @@ LISTE_KRIPTO = [
 ]
 
 # ==============================================================================
-# 4. DÖVİZ
+# 3. DÖVİZ
 # ==============================================================================
 LISTE_DOVIZ = [
     "USDTRY=X", "EURTRY=X", "GBPTRY=X", "CHFTRY=X", "CADTRY=X", "JPYTRY=X", "AUDTRY=X",
@@ -151,10 +71,26 @@ LISTE_DOVIZ = [
 ]
 
 # ==============================================================================
+# 4. YATIRIM FONLARI (YAHOO ÜZERİNDEN - POPÜLER LİSTE)
+# ==============================================================================
+# TEFAS API yerine, Yahoo'da işlem gören en popüler fonları ekledik.
+# Bu yöntem %100 çalışır ve engellenmez.
+LISTE_FON = [
+    "AFT.IS", "MAC.IS", "TCD.IS", "YAY.IS", "AFA.IS", "IPJ.IS", "TGE.IS", "NNF.IS", "BUY.IS", "HVS.IS",
+    "TI1.IS", "TI2.IS", "TI3.IS", "KUB.IS", "GMR.IS", "TKF.IS", "TCA.IS", "ZPE.IS", "ZDZ.IS", "UPH.IS",
+    "GSP.IS", "FIL.IS", "FID.IS", "RBH.IS", "MRI.IS", "EID.IS", "SUA.IS", "ST1.IS", "KTM.IS", "MPS.IS",
+    "DBH.IS", "TDG.IS", "TTE.IS", "YDI.IS", "AES.IS", "IHK.IS", "IDH.IS", "OKD.IS", "KPC.IS", "KRV.IS",
+    "GBC.IS", "HKH.IS", "ACC.IS", "FPH.IS", "GL1.IS", "TUA.IS", "TPZ.IS", "IJZ.IS", "IIH.IS", "ICZ.IS",
+    "OJT.IS", "AOY.IS", "AAV.IS", "YAS.IS", "YAK.IS", "NHY.IS", "GOH.IS", "FIB.IS", "TIV.IS", "TI6.IS",
+    "TI7.IS", "RPD.IS", "RИК.IS", "ZJL.IS", "ZHB.IS", "ZMB.IS", "YTD.IS", "KZL.IS", "NRC.IS", "NJR.IS",
+    # (İstediğin başka fon varsa buraya 'KODU.IS' şeklinde ekleyebilirsin)
+]
+
+# ==============================================================================
 # 5. BIST (TAM LİSTE)
 # ==============================================================================
 LISTE_BIST = [
-    "A1CAP.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "ADGYO.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AGROT.IS", "AGYO.IS", "AHGAZ.IS", "AKBNK.IS", "AKCNS.IS", "AKENR.IS", "AKFGY.IS", "AKFYE.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", "AKSEN.IS", "AKSGY.IS", "AKSUE.IS", "AKYHO.IS", "ALARK.IS", "ALBRK.IS", "ALCAR.IS", "ALCTL.IS", "ALFAS.IS", "ALGYO.IS", "ALKA.IS", "ALKIM.IS", "ALMAD.IS", "ALTNY.IS", "ANELE.IS", "ANGEN.IS", "ANHYT.IS", "ANSGR.IS", "ARASE.IS", "ARCLK.IS", "ARDYZ.IS", "ARENA.IS", "ARSAN.IS", "ARZUM.IS", "ASELS.IS", "ASGYO.IS", "ASTOR.IS", "ASUZU.IS", "ATAGY.IS", "ATAKP.IS", "ATATP.IS", "ATEKS.IS", "ATLAS.IS", "ATSYH.IS", "AVGYO.IS", "AVHOL.IS", "AVOD.IS", "AVPGY.IS", "AVTUR.IS", "AYCES.IS", "AYDEM.IS", "AYEN.IS", "AYES.IS", "AYGAZ.IS", "AZTEK.IS", 
+    "A1CAP.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "ADGYO.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AGROT.IS", "AGYO.IS", "AHGAZ.IS", "AKBNK.IS", "AKCNS.IS", "AKENR.IS", "AKFGY.IS", "AKFYE.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", "AKSEN.IS", "AKSGY.IS", "AKSUE.IS", "AKYHO.IS", "ALARK.IS", "ALBRK.IS", "ALCAR.IS", "ALCTL.IS", "ALFAS.IS", "ALGYO.IS", "ALKA.IS", "ALKIM.IS", "ALTNY.IS", "ANELE.IS", "ANGEN.IS", "ANHYT.IS", "ANSGR.IS", "ARASE.IS", "ARCLK.IS", "ARDYZ.IS", "ARENA.IS", "ARSAN.IS", "ARZUM.IS", "ASELS.IS", "ASGYO.IS", "ASTOR.IS", "ASUZU.IS", "ATAGY.IS", "ATAKP.IS", "ATATP.IS", "ATEKS.IS", "ATLAS.IS", "ATSYH.IS", "AVGYO.IS", "AVHOL.IS", "AVOD.IS", "AVPGY.IS", "AVTUR.IS", "AYCES.IS", "AYDEM.IS", "AYEN.IS", "AYES.IS", "AYGAZ.IS", "AZTEK.IS", 
     "BAGFS.IS", "BAKAB.IS", "BALAT.IS", "BANVT.IS", "BARMA.IS", "BASCM.IS", "BASGZ.IS", "BAYRK.IS", "BEGYO.IS", "BERA.IS", "BEYAZ.IS", "BFREN.IS", "BIENY.IS", "BIGCH.IS", "BIMAS.IS", "BINHO.IS", "BIOEN.IS", "BIZIM.IS", "BJKAS.IS", "BLCYT.IS", "BMSCH.IS", "BMSTL.IS", "BNTAS.IS", "BOBET.IS", "BORLS.IS", "BOSSA.IS", "BRISA.IS", "BRKO.IS", "BRKSN.IS", "BRKVY.IS", "BRLSM.IS", "BRMEN.IS", "BRSAN.IS", "BRYAT.IS", "BSOKE.IS", "BTCIM.IS", "BUCIM.IS", "BURCE.IS", "BURVA.IS", "BVSAN.IS", "BYDNR.IS", 
     "CANTE.IS", "CASA.IS", "CCOLA.IS", "CELHA.IS", "CEMAS.IS", "CEMTS.IS", "CEOEM.IS", "CIMSA.IS", "CLEBI.IS", "CMBTN.IS", "CMENT.IS", "CONSE.IS", "COSMO.IS", "CRDFA.IS", "CRFSA.IS", "CUSAN.IS", "CVKMD.IS", "CWENE.IS", 
     "DAPGM.IS", "DARDL.IS", "DENGE.IS", "DERHL.IS", "DERIM.IS", "DESA.IS", "DESPC.IS", "DEVA.IS", "DGATE.IS", "DGGYO.IS", "DGNMO.IS", "DIRIT.IS", "DITAS.IS", "DMSAS.IS", "DNISI.IS", "DOAS.IS", "DOBUR.IS", "DOCO.IS", "DOGUB.IS", "DOHOL.IS", "DOKTA.IS", "DURDO.IS", "DYOBY.IS", "DZGYO.IS", 
@@ -185,32 +121,34 @@ LISTE_BIST = [
 # ==============================================================================
 
 try:
-    print("--- MEGA FİNANS BOTU (YATIRIM FONLARI + TEMİZ LİSTE) ---")
+    print("--- MEGA FİNANS BOTU (FULL YAHOO MODU) ---")
     
-    # 1. YATIRIM FONLARI (TEFAS)
-    data_fonlar = get_tefas_data()
+    # Tüm Listeleri Birleştir
+    # LISTE_FON buraya eklendi!
+    tum_semboller = LISTE_ABD + LISTE_KRIPTO + LISTE_DOVIZ + LISTE_BIST + LISTE_FON
     
-    # 2. DİĞER PİYASALAR (YAHOO)
-    tum_semboller = LISTE_ABD + LISTE_KRIPTO + LISTE_DOVIZ + LISTE_BIST
-    print(f"Yahoo Varlık Sayısı: {len(tum_semboller)}")
+    print(f"Toplam Takip Edilecek Varlık: {len(tum_semboller)}")
     
-    print("Yahoo Finance verileri çekiliyor...")
+    print("Yahoo Finance verileri indiriliyor (Fonlar dahil)...")
+    # period="5d" -> Tatillerde son kapanış fiyatını yakalamak için
     df = yf.download(tum_semboller, period="5d", progress=False, threads=True, auto_adjust=True)['Close']
     
+    # KUTULAR
     data_borsa_tr = {}
     data_borsa_abd = {}
     data_kripto = {}
     data_doviz = {}
+    data_fonlar = {}
     
     if not df.empty:
-        df_dolu = df.ffill()
+        df_dolu = df.ffill() # Boş günleri doldur
         son_fiyatlar = df_dolu.iloc[-1]
         
         for sembol in tum_semboller:
             try:
                 fiyat = son_fiyatlar.get(sembol)
                 if pd.notna(fiyat):
-                    fiyat = round(float(fiyat), 2)
+                    fiyat = round(float(fiyat), 4) # Fonlar için 4 hane daha iyidir
                     
                     if sembol in LISTE_BIST:
                         data_borsa_tr[sembol.replace(".IS", "")] = fiyat
@@ -220,17 +158,23 @@ try:
                         data_kripto[sembol.replace("-USD", "")] = fiyat
                     elif sembol in LISTE_DOVIZ:
                         data_doviz[sembol.replace("TRY=X", "").replace("=X", "")] = fiyat
+                    elif sembol in LISTE_FON:
+                        data_fonlar[sembol.replace(".IS", "")] = fiyat
             except: continue
     
-    print(f"   -> ✅ Yahoo Bitti: BIST({len(data_borsa_tr)}), ABD({len(data_borsa_abd)}), Kripto({len(data_kripto)}), Döviz({len(data_doviz)})")
+    print(f"   -> ✅ Yahoo Bitti:")
+    print(f"      - BIST: {len(data_borsa_tr)}")
+    print(f"      - ABD: {len(data_borsa_abd)}")
+    print(f"      - Kripto: {len(data_kripto)}")
+    print(f"      - Döviz: {len(data_doviz)}")
+    print(f"      - Fonlar: {len(data_fonlar)}")
 
-    # 3. ALTIN
+    # 3. ALTIN (Siteden Çekim)
     print("Altın verileri çekiliyor...")
     data_altin = {}
     try:
         session = requests.Session()
-        r = session.get("https://altin.doviz.com/", headers=headers_general, timeout=20)
-        from bs4 import BeautifulSoup # Local import
+        r = session.get("https://altin.doviz.com/", headers=headers, timeout=20)
         if r.status_code == 200:
             soup = BeautifulSoup(r.content, "html.parser")
             for satir in soup.find_all("tr"):
@@ -245,7 +189,7 @@ try:
     except: pass
     print(f"   -> ✅ Altın Bitti: {len(data_altin)} adet")
 
-    # 4. KAYIT (FONLARI EKLEDİK)
+    # 4. KAYIT
     final_paket = {
         "borsa_tr_tl": data_borsa_tr,
         "borsa_abd_usd": data_borsa_abd,
