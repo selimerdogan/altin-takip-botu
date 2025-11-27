@@ -35,7 +35,7 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# DEV LİSTELER (HATALI OLANLAR TEMİZLENDİ)
+# DEV LİSTELER
 # ==============================================================================
 
 # 1. ABD BORSASI (S&P 100)
@@ -47,7 +47,7 @@ LISTE_ABD = [
     "DHR", "PM", "UNP", "IBM", "AMGN", "GE", "HON", "BA", "SPY", "QQQ", "UBER", "PLTR"
 ]
 
-# 2. KRİPTO (Hata veren RNDR, PEPE, FTM, UNI vb. çıkarıldı)
+# 2. KRİPTO
 LISTE_KRIPTO = [
     "BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD", "ADA-USD", "AVAX-USD", "DOGE-USD",
     "TRX-USD", "DOT-USD", "LINK-USD", "LTC-USD", "SHIB-USD", "ATOM-USD",
@@ -61,7 +61,7 @@ LISTE_DOVIZ = [
     "EURUSD=X", "GBPUSD=X"
 ]
 
-# 4. BIST (Hata verenler ve kapalı hisseler temizlendi)
+# 4. BIST (SELGD.IS ÇIKARILDI)
 LISTE_BIST = [
     "ACSEL.IS", "ADEL.IS", "ADESE.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AGYO.IS", "AKBNK.IS", "AKCNS.IS",
     "AKENR.IS", "AKFGY.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", "AKSEN.IS", "AKSGY.IS", "AKSUE.IS", "AKYHO.IS", "ALARK.IS",
@@ -99,7 +99,7 @@ LISTE_BIST = [
     "MRGYO.IS", "MRSHL.IS", "MSGYO.IS", "MTRKS.IS", "MTRYO.IS", "MZHLD.IS", "NATEN.IS", "NETAS.IS", "NIBAS.IS", "NTGAZ.IS",
     "NTHOL.IS", "NUGYO.IS", "NUHCM.IS", "ODAS.IS", "OFSYM.IS", "ONCSM.IS", "ORCAY.IS", "ORGE.IS", "ORMA.IS", "OSMEN.IS",
     "OSTIM.IS", "OTKAR.IS", "OTTO.IS", "OYAKC.IS", "OYAYO.IS", "OYLUM.IS", "OYYAT.IS", "OZGYO.IS", "OZKGY.IS", "OZRDN.IS",
-    "OZSUB.IS", "PAGYO.IS", "PAMEL.IS", "PAPIL.IS", "PARSN.IS", "PASEU.IS", "PCILT.IS", "PENGD.IS",
+    "OZSUB.IS", "PAGYO.IS", "PAMEL.IS", "PAPIL.IS", "PARSN.IS", "PASEU.IS", "PCILT.IS", "PEKGY.IS", "PENGD.IS",
     "PENTA.IS", "PETKM.IS", "PETUN.IS", "PGSUS.IS", "PINSU.IS", "PKART.IS", "PKENT.IS", "PLTUR.IS", "PNLSN.IS",
     "PNSUT.IS", "POLHO.IS", "POLTK.IS", "PRDGS.IS", "PRKAB.IS", "PRKME.IS", "PRZMA.IS", "PSGYO.IS", "PSDTC.IS",
     "QUAGR.IS", "RALYH.IS", "RAYSG.IS", "RNPOL.IS", "RODRG.IS", "RTALB.IS", "RUBNS.IS", "RYGYO.IS",
@@ -121,16 +121,16 @@ LISTE_BIST = [
 # ==============================================================================
 
 try:
-    print("--- FİNANS BOTU (TEMİZLENMİŞ VERSİYON) ---")
+    print("--- FİNANS BOTU (SAAT FARKI DÜZELTİLDİ) ---")
     
-    # 1. TÜM PİYASALAR İÇİN TEK DEV İSTEK (Batch Download)
-    print("1. Tüm piyasalar (BIST, ABD, Kripto, Döviz) Yahoo'dan indiriliyor...")
+    # 1. TÜM PİYASALAR (Batch Download)
+    print("1. Tüm piyasalar Yahoo'dan indiriliyor...")
     
-    # Tüm sembolleri birleştir (ABD Listesi dahil!)
     tum_semboller = LISTE_ABD + LISTE_KRIPTO + LISTE_DOVIZ + LISTE_BIST
     
-    # Tek seferde indir (auto_adjust=True ile uyarıyı kapatıyoruz)
-    df = yf.download(tum_semboller, period="1d", progress=False, threads=True, auto_adjust=True)['Close']
+    # CRITICAL FIX: period="5d" (Son 5 gün)
+    # Bu sayede ABD piyasası kapalı bile olsa dünkü veriyi alabileceğiz.
+    df = yf.download(tum_semboller, period="5d", progress=False, threads=True, auto_adjust=True)['Close']
     
     # KUTULAR
     data_borsa_tr = {}
@@ -139,15 +139,16 @@ try:
     data_doviz = {}
     
     if not df.empty:
-        # Son satırı (en güncel fiyatları) al
-        son_fiyatlar = df.iloc[-1]
+        # CRITICAL FIX: Forward Fill (Boşlukları Doldur)
+        # Eğer bugün ABD verisi NaN (boş) ise, dünkü veriyi bugüne taşı.
+        df_dolu = df.ffill()
+        
+        # En son satırı (en güncel veya taşınmış veriyi) al
+        son_fiyatlar = df_dolu.iloc[-1]
         
         for sembol in tum_semboller:
             try:
-                # Fiyatı çek (Get ile hata vermesini engelle)
                 fiyat = son_fiyatlar.get(sembol)
-                
-                # Fiyat geçerli mi (NaN değil mi?)
                 if pd.notna(fiyat):
                     fiyat = round(float(fiyat), 2)
                     
@@ -176,7 +177,7 @@ try:
     print(f"✅ Yahoo Tamamlandı: BIST({len(data_borsa_tr)}), ABD({len(data_borsa_abd)}), Kripto({len(data_kripto)}), Döviz({len(data_doviz)})")
 
 
-    # 2. ALTIN (Altin.doviz.com'dan Kazıma)
+    # 2. ALTIN
     print("2. Altın verileri taranıyor...")
     data_altin = {}
     try:
@@ -216,7 +217,7 @@ try:
         db.collection(u'market_history').document(bugun_tarih).set(
             {u'hourly': {su_an_saat_dakika: final_paket}}, merge=True
         )
-        print(f"🎉 BAŞARILI: [{bugun_tarih} - {su_an_saat_dakika}] Veriler kaydedildi.")
+        print(f"🎉 BAŞARILI: [{bugun_tarih} - {su_an_saat_dakika}] Tüm veriler kaydedildi.")
     else:
         print("❌ HATA: Hiçbir veri toplanamadı!")
         sys.exit(1)
