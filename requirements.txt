@@ -3,3 +3,4 @@ requests
 firebase-admin
 lxml
 openpyxl
+beautifulsoup4
