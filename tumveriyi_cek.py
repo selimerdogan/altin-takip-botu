@@ -7,6 +7,7 @@ import sys
 import os
 import yfinance as yf
 import pandas as pd
+import io
 
 # --- AYARLAR ---
 headers = {
@@ -35,33 +36,58 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# DEV LİSTELER
+# DİNAMİK LİSTE OLUŞTURUCULAR
 # ==============================================================================
 
-# 1. ABD BORSASI (S&P 100)
-LISTE_ABD = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "BRK-B", "LLY", "AVGO",
-    "V", "JPM", "XOM", "WMT", "UNH", "MA", "PG", "JNJ", "HD", "MRK", "COST", "ABBV",
-    "CVX", "CRM", "BAC", "AMD", "PEP", "KO", "NFLX", "ADBE", "DIS", "MCD", "CSCO",
-    "TMUS", "ABT", "INTC", "INTU", "CMCSA", "PFE", "NKE", "WFC", "QCOM", "TXN",
-    "DHR", "PM", "UNP", "IBM", "AMGN", "GE", "HON", "BA", "SPY", "QQQ", "UBER", "PLTR"
-]
+def get_sp500_tickers():
+    """
+    Wikipedia'dan ABD'nin en büyük 500 şirketinin (S&P 500) listesini çeker.
+    Bu sayede elle yazmaya gerek kalmaz, liste hep günceldir.
+    """
+    try:
+        print("   -> S&P 500 Listesi Wikipedia'dan çekiliyor...")
+        url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+        # SSL sertifika hatasını önlemek için requests ile alıp pandas'a veriyoruz
+        r = requests.get(url, headers=headers)
+        df_list = pd.read_html(io.StringIO(r.text))
+        df = df_list[0]
+        tickers = df['Symbol'].tolist()
+        # Yahoo formatına çevir (BF.B -> BF-B)
+        tickers = [t.replace('.', '-') for t in tickers]
+        print(f"   -> {len(tickers)} adet ABD hissesi bulundu.")
+        return tickers
+    except Exception as e:
+        print(f"   ⚠️ S&P 500 Listesi alınamadı, yedek liste kullanılacak. Hata: {e}")
+        # Hata olursa en azından devleri manuel ekleyelim
+        return ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "BRK-B", "LLY", "AVGO", "V", "JPM"]
 
-# 2. KRİPTO
+# ==============================================================================
+# SABİT DEV LİSTELER
+# ==============================================================================
+
+# 1. KRİPTO (TOP 100 - En Yüksek Hacimliler)
+# Yahoo Finance tarafından tanınan popüler 100 coin
 LISTE_KRIPTO = [
     "BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "XRP-USD", "ADA-USD", "AVAX-USD", "DOGE-USD",
-    "TRX-USD", "DOT-USD", "LINK-USD", "LTC-USD", "SHIB-USD", "ATOM-USD",
-    "XLM-USD", "NEAR-USD", "INJ-USD", "FIL-USD", "HBAR-USD", "LDO-USD", "ARB-USD",
-    "ALGO-USD", "SAND-USD"
+    "TRX-USD", "DOT-USD", "LINK-USD", "LTC-USD", "SHIB-USD", "UNI-USD", "ATOM-USD", "XLM-USD",
+    "NEAR-USD", "INJ-USD", "FIL-USD", "HBAR-USD", "LDO-USD", "ARB-USD", "ALGO-USD", "SAND-USD",
+    "APT-USD", "QNT-USD", "VET-USD", "OP-USD", "GRT-USD", "RNDR-USD", "EGLD-USD", "AAVE-USD",
+    "THETA-USD", "AXS-USD", "MANA-USD", "EOS-USD", "FLOW-USD", "XTZ-USD", "IMX-USD", "KCS-USD",
+    "MKR-USD", "SNX-USD", "NEO-USD", "JASMY-USD", "KLAY-USD", "FTM-USD", "GALA-USD", "CFX-USD",
+    "CHZ-USD", "CRV-USD", "COMP-USD", "ZEC-USD", "XEC-USD", "IOTA-USD", "GMX-USD", "PEPE-USD",
+    "LUNC-USD", "BTT-USD", "MINA-USD", "DASH-USD", "CAKE-USD", "FXS-USD", "RUNE-USD", "KAVA-USD",
+    "ENJ-USD", "ZIL-USD", "BAT-USD", "TWT-USD", "QTUM-USD", "MASK-USD", "CELO-USD", "RVN-USD",
+    "LRC-USD", "ENS-USD", "CVX-USD", "YFI-USD", "ANKR-USD", "1INCH-USD", "HOT-USD", "GLM-USD",
+    "SC-USD", "GMT-USD", "IOST-USD", "ONT-USD", "WAKP-USD", "SUSHI-USD", "SXP-USD", "ICX-USD"
 ]
 
-# 3. DÖVİZ
+# 2. DÖVİZ
 LISTE_DOVIZ = [
-    "USDTRY=X", "EURTRY=X", "GBPTRY=X", "CHFTRY=X", "CADTRY=X", "JPYTRY=X", "AUDTRY=X",
-    "EURUSD=X", "GBPUSD=X"
+    "USDTRY=X", "EURTRY=X", "GBPTRY=X", "CHFTRY=X", "CADTRY=X", "JPYTRY=X", "AUDTRY=X", "CNYTRY=X",
+    "EURUSD=X", "GBPUSD=X", "JPY=X", "DX-Y.NYB" # DX-Y Dolar endeksidir
 ]
 
-# 4. BIST (SELGD.IS ÇIKARILDI)
+# 3. BIST (TÜM LİSTE - TEMİZLENMİŞ)
 LISTE_BIST = [
     "ACSEL.IS", "ADEL.IS", "ADESE.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AGYO.IS", "AKBNK.IS", "AKCNS.IS",
     "AKENR.IS", "AKFGY.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", "AKSEN.IS", "AKSGY.IS", "AKSUE.IS", "AKYHO.IS", "ALARK.IS",
@@ -99,129 +125,6 @@ LISTE_BIST = [
     "MRGYO.IS", "MRSHL.IS", "MSGYO.IS", "MTRKS.IS", "MTRYO.IS", "MZHLD.IS", "NATEN.IS", "NETAS.IS", "NIBAS.IS", "NTGAZ.IS",
     "NTHOL.IS", "NUGYO.IS", "NUHCM.IS", "ODAS.IS", "OFSYM.IS", "ONCSM.IS", "ORCAY.IS", "ORGE.IS", "ORMA.IS", "OSMEN.IS",
     "OSTIM.IS", "OTKAR.IS", "OTTO.IS", "OYAKC.IS", "OYAYO.IS", "OYLUM.IS", "OYYAT.IS", "OZGYO.IS", "OZKGY.IS", "OZRDN.IS",
-    "OZSUB.IS", "PAGYO.IS", "PAMEL.IS", "PAPIL.IS", "PARSN.IS", "PASEU.IS", "PCILT.IS", "PEKGY.IS", "PENGD.IS",
+    "OZSUB.IS", "PAGYO.IS", "PAMEL.IS", "PAPIL.IS", "PARSN.IS", "PASEU.IS", "PCILT.IS", "PENGD.IS",
     "PENTA.IS", "PETKM.IS", "PETUN.IS", "PGSUS.IS", "PINSU.IS", "PKART.IS", "PKENT.IS", "PLTUR.IS", "PNLSN.IS",
-    "PNSUT.IS", "POLHO.IS", "POLTK.IS", "PRDGS.IS", "PRKAB.IS", "PRKME.IS", "PRZMA.IS", "PSGYO.IS", "PSDTC.IS",
-    "QUAGR.IS", "RALYH.IS", "RAYSG.IS", "RNPOL.IS", "RODRG.IS", "RTALB.IS", "RUBNS.IS", "RYGYO.IS",
-    "RYSAS.IS", "SAHOL.IS", "SAMAT.IS", "SANEL.IS", "SANFM.IS", "SANKO.IS", "SARKY.IS", "SASA.IS", "SAYAS.IS", "SDTTR.IS",
-    "SEKFK.IS", "SEKUR.IS", "SELEC.IS", "SELGD.IS", "SELVA.IS", "SEYKM.IS", "SILVR.IS", "SISE.IS", "SKBNK.IS", "SKTAS.IS",
-    "SMART.IS", "SMRTG.IS", "SNGYO.IS", "SNKRN.IS", "SNPAM.IS", "SODSN.IS", "SOKE.IS", "SOKM.IS", "SONME.IS", "SRVGY.IS",
-    "SUMAS.IS", "SUNTK.IS", "SUWEN.IS", "TATGD.IS", "TAVHL.IS", "TBORG.IS", "TCELL.IS", "TDGYO.IS", "TEKTU.IS", "TERA.IS",
-    "TEZOL.IS", "TGSAS.IS", "THYAO.IS", "TKFEN.IS", "TKNSA.IS", "TLMAN.IS", "TMPOL.IS", "TMSN.IS",
-    "TNZTP.IS", "TOASO.IS", "TRCAS.IS", "TRGYO.IS", "TRILC.IS", "TSGYO.IS", "TSKB.IS", "TSPOR.IS", "TTKOM.IS", "TTRAK.IS",
-    "TUCLK.IS", "TUKAS.IS", "TUPRS.IS", "TURGG.IS", "TURSG.IS", "ULAS.IS", "ULKER.IS", "ULUFA.IS", "ULUSE.IS", "ULUUN.IS",
-    "UNLU.IS", "USAK.IS", "VAKBN.IS", "VAKFN.IS", "VAKKO.IS", "VANGD.IS", "VBTYZ.IS", "VERTU.IS",
-    "VERUS.IS", "VESBE.IS", "VESTL.IS", "VKFYO.IS", "VKGYO.IS", "VKING.IS", "YAPRK.IS", "YATAS.IS", "YAYLA.IS", "YEOTK.IS",
-    "YESIL.IS", "YGGYO.IS", "YGYO.IS", "YKBNK.IS", "YKSLN.IS", "YONGA.IS", "YUNSA.IS", "YYAPI.IS", "YYLGD.IS", "ZEDUR.IS",
-    "ZOREN.IS", "ZRGYO.IS"
-]
-
-# ==============================================================================
-# ANA PROGRAM
-# ==============================================================================
-
-try:
-    print("--- FİNANS BOTU (SAAT FARKI DÜZELTİLDİ) ---")
-    
-    # 1. TÜM PİYASALAR (Batch Download)
-    print("1. Tüm piyasalar Yahoo'dan indiriliyor...")
-    
-    tum_semboller = LISTE_ABD + LISTE_KRIPTO + LISTE_DOVIZ + LISTE_BIST
-    
-    # CRITICAL FIX: period="5d" (Son 5 gün)
-    # Bu sayede ABD piyasası kapalı bile olsa dünkü veriyi alabileceğiz.
-    df = yf.download(tum_semboller, period="5d", progress=False, threads=True, auto_adjust=True)['Close']
-    
-    # KUTULAR
-    data_borsa_tr = {}
-    data_borsa_abd = {}
-    data_kripto = {}
-    data_doviz = {}
-    
-    if not df.empty:
-        # CRITICAL FIX: Forward Fill (Boşlukları Doldur)
-        # Eğer bugün ABD verisi NaN (boş) ise, dünkü veriyi bugüne taşı.
-        df_dolu = df.ffill()
-        
-        # En son satırı (en güncel veya taşınmış veriyi) al
-        son_fiyatlar = df_dolu.iloc[-1]
-        
-        for sembol in tum_semboller:
-            try:
-                fiyat = son_fiyatlar.get(sembol)
-                if pd.notna(fiyat):
-                    fiyat = round(float(fiyat), 2)
-                    
-                    if sembol in LISTE_BIST:
-                        temiz_isim = sembol.replace(".IS", "")
-                        data_borsa_tr[temiz_isim] = fiyat
-                        
-                    elif sembol in LISTE_ABD:
-                        data_borsa_abd[sembol] = fiyat
-                        
-                    elif sembol in LISTE_KRIPTO:
-                        temiz_isim = sembol.replace("-USD", "")
-                        data_kripto[temiz_isim] = fiyat
-                        
-                    elif sembol in LISTE_DOVIZ:
-                        if "USD" in sembol: data_doviz["DOLAR"] = fiyat
-                        if "EUR" in sembol: data_doviz["EURO"] = fiyat
-                        if "GBP" in sembol: data_doviz["STERLIN"] = fiyat
-                        if "JPY" in sembol: data_doviz["YEN"] = fiyat
-                        if "CAD" in sembol: data_doviz["KANADA_DOLARI"] = fiyat
-                        if "CHF" in sembol: data_doviz["ISVICRE_FRANGI"] = fiyat
-                        if "AUD" in sembol: data_doviz["AVUSTRALYA_DOLARI"] = fiyat
-                        
-            except: continue
-    
-    print(f"✅ Yahoo Tamamlandı: BIST({len(data_borsa_tr)}), ABD({len(data_borsa_abd)}), Kripto({len(data_kripto)}), Döviz({len(data_doviz)})")
-
-
-    # 2. ALTIN
-    print("2. Altın verileri taranıyor...")
-    data_altin = {}
-    try:
-        url_altin = "https://altin.doviz.com/"
-        session = requests.Session()
-        r = session.get(url_altin, headers=headers, timeout=20)
-        if r.status_code == 200:
-            soup = BeautifulSoup(r.content, "html.parser")
-            for satir in soup.find_all("tr"):
-                cols = satir.find_all("td")
-                if len(cols) > 2:
-                    try:
-                        isim = cols[0].get_text(strip=True)
-                        if "Ons" not in isim: 
-                            fiyat = metni_sayiya_cevir(cols[2].get_text(strip=True))
-                            if fiyat > 0:
-                                data_altin[isim] = fiyat
-                    except: continue
-        print(f"✅ Altın alındı: {len(data_altin)} adet")
-    except Exception as e:
-        print(f"⚠️ Altın Hatası: {e}")
-
-    # 3. KAYIT
-    final_paket = {
-        "borsa_tr_tl": data_borsa_tr,
-        "borsa_abd_usd": data_borsa_abd,
-        "kripto_usd": data_kripto,
-        "doviz_tl": data_doviz,
-        "altin_tl": data_altin
-    }
-
-    if any(final_paket.values()):
-        simdi = datetime.now()
-        bugun_tarih = simdi.strftime("%Y-%m-%d")
-        su_an_saat_dakika = simdi.strftime("%H:%M")
-        
-        db.collection(u'market_history').document(bugun_tarih).set(
-            {u'hourly': {su_an_saat_dakika: final_paket}}, merge=True
-        )
-        print(f"🎉 BAŞARILI: [{bugun_tarih} - {su_an_saat_dakika}] Tüm veriler kaydedildi.")
-    else:
-        print("❌ HATA: Hiçbir veri toplanamadı!")
-        sys.exit(1)
-
-except Exception as e:
-    print(f"KRİTİK HATA: {e}")
-    sys.exit(1)
+    "PNS
