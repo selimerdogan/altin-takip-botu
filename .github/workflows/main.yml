@@ -1,0 +1,34 @@
+name: Altın Botu Çalıştır
+
+on:
+  schedule:
+    # Her saat başı çalışır (Saat dilimi UTC'dir, TR saatiyle 3 saat fark eder ama önemli değil)
+    - cron: '0 * * * *'
+  # İstersen butona basarak elle de çalıştırabilirsin
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Kodları Çek
+        uses: actions/checkout@v3
+
+      - name: Python Kur
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Kütüphaneleri Yükle
+        run: |
+          pip install -r requirements.txt
+
+      - name: Gizli Anahtarı Dosyaya Dönüştür
+        env:
+          FIREBASE_KEY: ${{ secrets.FIREBASE_KEY }}
+        run: |
+          echo "$FIREBASE_KEY" > serviceAccountKey.json
+
+      - name: Botu Çalıştır
+        run: python altin_cek.py
