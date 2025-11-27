@@ -13,9 +13,9 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 # --- AYARLAR ---
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-    "Referer": "https://www.google.com/"
+# Genel User-Agent
+headers_general = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
 }
 
 # --- FIREBASE BAĞLANTISI ---
@@ -40,55 +40,66 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. YATIRIM FONLARI (TEFAS - AKILLI TARİH MODU)
+# 1. YATIRIM FONLARI (TEFAS - COOKIE DESTEKLİ GÜÇLÜ MOD)
 # ==============================================================================
 def get_tefas_data():
     """
-    TEFAS verisi bazen 'bugün' için boş döner.
-    Bu fonksiyon bugünden başlayıp geriye doğru (max 5 gün) tarama yapar.
-    Dolu veriyi bulduğu an alır ve durur.
+    TEFAS sitesinden önce çerez (cookie) alır, sonra veriyi çeker.
+    Bu yöntem 'Veri Bulunamadı' hatasını çözer.
     """
-    url = "https://www.tefas.gov.tr/api/DB/BindComparisonFundReturns"
+    url_api = "https://www.tefas.gov.tr/api/DB/BindComparisonFundReturns"
+    url_home = "https://www.tefas.gov.tr/FonKarsilastirma.aspx"
     
-    # TEFAS için gerekli başlıklar
+    data_fon = {}
+    
+    # Oturum (Session) başlat - Bu sayede cookie'leri hafızada tutar
+    session = requests.Session()
+    
+    # Tarayıcı gibi görünmek için başlıklar
     tefas_headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/115.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
         "X-Requested-With": "XMLHttpRequest",
         "Referer": "https://www.tefas.gov.tr/FonKarsilastirma.aspx",
         "Origin": "https://www.tefas.gov.tr",
-        "Content-Type": "application/json; charset=UTF-8"
+        "Content-Type": "application/json; charset=UTF-8",
+        "Accept": "application/json, text/javascript, */*; q=0.01"
     }
 
-    # Bugünden başlayıp 5 gün geriye git (Veri bulana kadar)
-    for i in range(5):
-        tarih_obj = datetime.now() - timedelta(days=i)
-        tarih_str = tarih_obj.strftime("%d.%m.%Y") # Örn: 27.11.2025
+    try:
+        # 1. Önce ana sayfaya git ve Cookie al
+        print("   -> TEFAS ana sayfasına bağlanılıyor (Cookie alınıyor)...")
+        session.get(url_home, headers=tefas_headers, timeout=15)
         
-        print(f"   -> TEFAS deneniyor: {tarih_str} ...")
-        
-        payload = {
-            "calismatipi": "2",
-            "fontip": "YAT",
-            "sfontip": "",
-            "fas": "",
-            "fonturkod": "",
-            "fongrup": "",
-            "bastarih": tarih_str,
-            "bittarih": tarih_str,
-            "fontur": "",
-            "fonkurucukod": "",
-            "gecenin_rengi": ""
-        }
-        
-        try:
-            r = requests.post(url, json=payload, headers=tefas_headers, timeout=30)
+        # 2. Bugünden geriye doğru 7 gün tara
+        for i in range(7):
+            tarih_obj = datetime.now() - timedelta(days=i)
+            tarih_str = tarih_obj.strftime("%d.%m.%Y")
+            
+            print(f"   -> TEFAS verisi deneniyor: {tarih_str} ...")
+            
+            payload = {
+                "calismatipi": "2",
+                "fontip": "YAT",
+                "sfontip": "",
+                "fas": "",
+                "fonturkod": "",
+                "fongrup": "",
+                "bastarih": tarih_str,
+                "bittarih": tarih_str,
+                "fontur": "",
+                "fonkurucukod": "",
+                "gecenin_rengi": ""
+            }
+            
+            # Post isteğini session üzerinden yapıyoruz
+            r = session.post(url_api, json=payload, headers=tefas_headers, timeout=30)
+            
             if r.status_code == 200:
                 sonuc = r.json()
                 data_list = sonuc.get('data', [])
                 
-                # Eğer liste doluysa (Veri varsa) işlemi bitir
+                # Veri geldiyse işle ve döngüyü kır
                 if data_list and len(data_list) > 10:
-                    data_fon = {}
                     for fon in data_list:
                         kod = fon.get('FONKODU')
                         fiyat = fon.get('FIYAT')
@@ -98,13 +109,13 @@ def get_tefas_data():
                                 data_fon[kod] = fiyat_float
                             except: continue
                     
-                    print(f"   -> ✅ TEFAS Başarılı! {tarih_str} tarihli {len(data_fon)} fon çekildi.")
-                    return data_fon
+                    print(f"   -> ✅ TEFAS Başarılı! {len(data_fon)} adet fon çekildi.")
+                    return data_fon # Fonksiyondan çık
             
-        except Exception as e:
-            print(f"   -> ⚠️ TEFAS Deneme Hatası: {e}")
-            
-    print("   -> ❌ TEFAS: 5 gün geriye gidildi ama veri bulunamadı.")
+    except Exception as e:
+        print(f"   -> ⚠️ TEFAS Hatası: {e}")
+        
+    print("   -> ❌ TEFAS: Veri çekilemedi (Tüm tarihler denendi).")
     return {}
 
 # ==============================================================================
@@ -140,10 +151,10 @@ LISTE_DOVIZ = [
 ]
 
 # ==============================================================================
-# 5. BIST (HATALILAR TEMİZLENDİ)
+# 5. BIST (TAM LİSTE)
 # ==============================================================================
 LISTE_BIST = [
-    "A1CAP.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "ADGYO.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AGROT.IS", "AGYO.IS", "AHGAZ.IS", "AKBNK.IS", "AKCNS.IS", "AKENR.IS", "AKFGY.IS", "AKFYE.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", "AKSEN.IS", "AKSGY.IS", "AKSUE.IS", "AKYHO.IS", "ALARK.IS", "ALBRK.IS", "ALCAR.IS", "ALCTL.IS", "ALFAS.IS", "ALGYO.IS", "ALKA.IS", "ALKIM.IS", "ALTNY.IS", "ANELE.IS", "ANGEN.IS", "ANHYT.IS", "ANSGR.IS", "ARASE.IS", "ARCLK.IS", "ARDYZ.IS", "ARENA.IS", "ARSAN.IS", "ARZUM.IS", "ASELS.IS", "ASGYO.IS", "ASTOR.IS", "ASUZU.IS", "ATAGY.IS", "ATAKP.IS", "ATATP.IS", "ATEKS.IS", "ATLAS.IS", "ATSYH.IS", "AVGYO.IS", "AVHOL.IS", "AVOD.IS", "AVPGY.IS", "AVTUR.IS", "AYCES.IS", "AYDEM.IS", "AYEN.IS", "AYES.IS", "AYGAZ.IS", "AZTEK.IS", 
+    "A1CAP.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "ADGYO.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AGROT.IS", "AGYO.IS", "AHGAZ.IS", "AKBNK.IS", "AKCNS.IS", "AKENR.IS", "AKFGY.IS", "AKFYE.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", "AKSEN.IS", "AKSGY.IS", "AKSUE.IS", "AKYHO.IS", "ALARK.IS", "ALBRK.IS", "ALCAR.IS", "ALCTL.IS", "ALFAS.IS", "ALGYO.IS", "ALKA.IS", "ALKIM.IS", "ALMAD.IS", "ALTNY.IS", "ANELE.IS", "ANGEN.IS", "ANHYT.IS", "ANSGR.IS", "ARASE.IS", "ARCLK.IS", "ARDYZ.IS", "ARENA.IS", "ARSAN.IS", "ARZUM.IS", "ASELS.IS", "ASGYO.IS", "ASTOR.IS", "ASUZU.IS", "ATAGY.IS", "ATAKP.IS", "ATATP.IS", "ATEKS.IS", "ATLAS.IS", "ATSYH.IS", "AVGYO.IS", "AVHOL.IS", "AVOD.IS", "AVPGY.IS", "AVTUR.IS", "AYCES.IS", "AYDEM.IS", "AYEN.IS", "AYES.IS", "AYGAZ.IS", "AZTEK.IS", 
     "BAGFS.IS", "BAKAB.IS", "BALAT.IS", "BANVT.IS", "BARMA.IS", "BASCM.IS", "BASGZ.IS", "BAYRK.IS", "BEGYO.IS", "BERA.IS", "BEYAZ.IS", "BFREN.IS", "BIENY.IS", "BIGCH.IS", "BIMAS.IS", "BINHO.IS", "BIOEN.IS", "BIZIM.IS", "BJKAS.IS", "BLCYT.IS", "BMSCH.IS", "BMSTL.IS", "BNTAS.IS", "BOBET.IS", "BORLS.IS", "BOSSA.IS", "BRISA.IS", "BRKO.IS", "BRKSN.IS", "BRKVY.IS", "BRLSM.IS", "BRMEN.IS", "BRSAN.IS", "BRYAT.IS", "BSOKE.IS", "BTCIM.IS", "BUCIM.IS", "BURCE.IS", "BURVA.IS", "BVSAN.IS", "BYDNR.IS", 
     "CANTE.IS", "CASA.IS", "CCOLA.IS", "CELHA.IS", "CEMAS.IS", "CEMTS.IS", "CEOEM.IS", "CIMSA.IS", "CLEBI.IS", "CMBTN.IS", "CMENT.IS", "CONSE.IS", "COSMO.IS", "CRDFA.IS", "CRFSA.IS", "CUSAN.IS", "CVKMD.IS", "CWENE.IS", 
     "DAPGM.IS", "DARDL.IS", "DENGE.IS", "DERHL.IS", "DERIM.IS", "DESA.IS", "DESPC.IS", "DEVA.IS", "DGATE.IS", "DGGYO.IS", "DGNMO.IS", "DIRIT.IS", "DITAS.IS", "DMSAS.IS", "DNISI.IS", "DOAS.IS", "DOBUR.IS", "DOCO.IS", "DOGUB.IS", "DOHOL.IS", "DOKTA.IS", "DURDO.IS", "DYOBY.IS", "DZGYO.IS", 
@@ -158,7 +169,7 @@ LISTE_BIST = [
     "MAALT.IS", "MACKO.IS", "MAGEN.IS", "MAKIM.IS", "MAKTK.IS", "MANAS.IS", "MARKA.IS", "MARTI.IS", "MAVI.IS", "MEDTR.IS", "MEGAP.IS", "MEPET.IS", "MERCN.IS", "MERIT.IS", "MERKO.IS", "METRO.IS", "METUR.IS", "MGROS.IS", "MIATK.IS", "MMCAS.IS", "MNDRS.IS", "MNDTR.IS", "MOBTL.IS", "MPARK.IS", "MRGYO.IS", "MRSHL.IS", "MSGYO.IS", "MTRKS.IS", "MTRYO.IS", "MZHLD.IS", 
     "NATEN.IS", "NETAS.IS", "NIBAS.IS", "NTGAZ.IS", "NTHOL.IS", "NUGYO.IS", "NUHCM.IS", 
     "OBAMS.IS", "ODAS.IS", "OFSYM.IS", "ONCSM.IS", "ORCAY.IS", "ORGE.IS", "ORMA.IS", "OSMEN.IS", "OSTIM.IS", "OTKAR.IS", "OTTO.IS", "OYAKC.IS", "OYAYO.IS", "OYLUM.IS", "OYYAT.IS", "OZGYO.IS", "OZKGY.IS", "OZRDN.IS", "OZSUB.IS", 
-    "PAGYO.IS", "PAMEL.IS", "PAPIL.IS", "PARSN.IS", "PASEU.IS", "PCILT.IS", "PEKGY.IS", "PENGD.IS", "PENTA.IS", "PETKM.IS", "PETUN.IS", "PGSUS.IS", "PINSU.IS", "PKART.IS", "PKENT.IS", "PLTUR.IS", "PNLSN.IS", "PNSUT.IS", "POLHO.IS", "POLTK.IS", "PRDGS.IS", "PRKAB.IS", "PRKME.IS", "PRZMA.IS", "PSGYO.IS", "PSDTC.IS", 
+    "PAGYO.IS", "PAMEL.IS", "PAPIL.IS", "PARSN.IS", "PASEU.IS", "PCILT.IS", "PEKGY.IS", "PENGD.IS", "PENTA.IS", "PETKM.IS", "PETUN.IS", "PGSUS.IS", "PINSU.IS", "PKART.IS", "PKENT.IS", "PLAT.IS", "PLTUR.IS", "PNLSN.IS", "PNSUT.IS", "POLHO.IS", "POLTK.IS", "PRDGS.IS", "PRKAB.IS", "PRKME.IS", "PRZMA.IS", "PSGYO.IS", "PSDTC.IS", 
     "QUAGR.IS", 
     "RALYH.IS", "RAYSG.IS", "REEDR.IS", "RNPOL.IS", "RODRG.IS", "ROYAL.IS", "RTALB.IS", "RUBNS.IS", "RYGYO.IS", "RYSAS.IS", 
     "SAHOL.IS", "SAMAT.IS", "SANEL.IS", "SANFM.IS", "SANKO.IS", "SARKY.IS", "SASA.IS", "SAYAS.IS", "SDTTR.IS", "SEKFK.IS", "SEKUR.IS", "SELEC.IS", "SELGD.IS", "SELVA.IS", "SEYKM.IS", "SILVR.IS", "SISE.IS", "SKBNK.IS", "SKTAS.IS", "SMART.IS", "SMRTG.IS", "SNGYO.IS", "SNKRN.IS", "SNPAM.IS", "SODSN.IS", "SOKE.IS", "SOKM.IS", "SONME.IS", "SRVGY.IS", "SUMAS.IS", "SUNTK.IS", "SURGY.IS", "SUWEN.IS", 
@@ -218,7 +229,8 @@ try:
     data_altin = {}
     try:
         session = requests.Session()
-        r = session.get("https://altin.doviz.com/", headers=headers, timeout=20)
+        r = session.get("https://altin.doviz.com/", headers=headers_general, timeout=20)
+        from bs4 import BeautifulSoup # Local import
         if r.status_code == 200:
             soup = BeautifulSoup(r.content, "html.parser")
             for satir in soup.find_all("tr"):
