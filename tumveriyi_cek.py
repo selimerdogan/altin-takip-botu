@@ -1,4 +1,5 @@
 import requests
+from bs4 import BeautifulSoup
 import firebase_admin
 from firebase_admin import credentials, firestore
 from datetime import datetime, timedelta
@@ -39,24 +40,17 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. YATIRIM FONLARI (TEFAS - GÜÇLENDİRİLMİŞ MOD)
+# 1. YATIRIM FONLARI (TEFAS - AKILLI TARİH MODU)
 # ==============================================================================
 def get_tefas_data():
     """
-    TEFAS'tan son 7 günün verisini çeker ve her fonun EN GÜNCEL fiyatını alır.
-    Böylece 'Bugün veri yok' sorununu çözer.
+    TEFAS verisi bazen 'bugün' için boş döner.
+    Bu fonksiyon bugünden başlayıp geriye doğru (max 5 gün) tarama yapar.
+    Dolu veriyi bulduğu an alır ve durur.
     """
     url = "https://www.tefas.gov.tr/api/DB/BindComparisonFundReturns"
-    data_fon = {}
     
-    # Tarih Hesaplama: Bugünden geriye 10 gün bakalım (Tatiller için garanti olsun)
-    bugun = datetime.now()
-    gecmis = bugun - timedelta(days=10)
-    
-    date_str_start = gecmis.strftime("%d.%m.%Y")
-    date_str_end = bugun.strftime("%d.%m.%Y")
-    
-    # TEFAS'ın istediği özel başlıklar (Tarayıcı taklidi)
+    # TEFAS için gerekli başlıklar
     tefas_headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/115.0.0.0 Safari/537.36",
         "X-Requested-With": "XMLHttpRequest",
@@ -65,53 +59,56 @@ def get_tefas_data():
         "Content-Type": "application/json; charset=UTF-8"
     }
 
-    payload = {
-        "calismatipi": "2",
-        "fontip": "YAT",
-        "sfontip": "",
-        "fas": "",
-        "fonturkod": "",
-        "fongrup": "",
-        "bastarih": date_str_start, 
-        "bittarih": date_str_end,
-        "fontur": "",
-        "fonkurucukod": "",
-        "gecenin_rengi": ""
-    }
-    
-    try:
-        print(f"   -> TEFAS Fonları çekiliyor ({date_str_start} - {date_str_end})...")
-        r = requests.post(url, json=payload, headers=tefas_headers, timeout=30)
+    # Bugünden başlayıp 5 gün geriye git (Veri bulana kadar)
+    for i in range(5):
+        tarih_obj = datetime.now() - timedelta(days=i)
+        tarih_str = tarih_obj.strftime("%d.%m.%Y") # Örn: 27.11.2025
         
-        if r.status_code == 200:
-            sonuc = r.json()
-            data_list = sonuc.get('data', [])
-            
-            # TEFAS karşılaştırma listesi genellikle en son fiyatı getirir.
-            # Biz yine de garantiye alalım.
-            for fon in data_list:
-                kod = fon.get('FONKODU')
-                fiyat = fon.get('FIYAT')
-                ad = fon.get('FONADI')
+        print(f"   -> TEFAS deneniyor: {tarih_str} ...")
+        
+        payload = {
+            "calismatipi": "2",
+            "fontip": "YAT",
+            "sfontip": "",
+            "fas": "",
+            "fonturkod": "",
+            "fongrup": "",
+            "bastarih": tarih_str,
+            "bittarih": tarih_str,
+            "fontur": "",
+            "fonkurucukod": "",
+            "gecenin_rengi": ""
+        }
+        
+        try:
+            r = requests.post(url, json=payload, headers=tefas_headers, timeout=30)
+            if r.status_code == 200:
+                sonuc = r.json()
+                data_list = sonuc.get('data', [])
                 
-                if kod and fiyat:
-                    try:
-                        # 12,3456 formatını 12.3456 yap
-                        fiyat_float = float(str(fiyat).replace(',', '.'))
-                        data_fon[kod] = fiyat_float
-                    except: continue
+                # Eğer liste doluysa (Veri varsa) işlemi bitir
+                if data_list and len(data_list) > 10:
+                    data_fon = {}
+                    for fon in data_list:
+                        kod = fon.get('FONKODU')
+                        fiyat = fon.get('FIYAT')
+                        if kod and fiyat:
+                            try:
+                                fiyat_float = float(str(fiyat).replace(',', '.'))
+                                data_fon[kod] = fiyat_float
+                            except: continue
+                    
+                    print(f"   -> ✅ TEFAS Başarılı! {tarih_str} tarihli {len(data_fon)} fon çekildi.")
+                    return data_fon
             
-            print(f"   -> ✅ TEFAS Başarılı: {len(data_fon)} adet fon güncellendi.")
-        else:
-            print(f"   -> ⚠️ TEFAS Sunucu Hatası: {r.status_code}")
+        except Exception as e:
+            print(f"   -> ⚠️ TEFAS Deneme Hatası: {e}")
             
-    except Exception as e:
-        print(f"   -> ⚠️ TEFAS Bağlantı Sorunu: {e}")
-        
-    return data_fon
+    print("   -> ❌ TEFAS: 5 gün geriye gidildi ama veri bulunamadı.")
+    return {}
 
 # ==============================================================================
-# 2. ABD BORSASI
+# 2. ABD BORSASI (S&P 500)
 # ==============================================================================
 LISTE_ABD = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "BRK-B", "LLY", "AVGO", "V", "JPM", "XOM", "WMT", "UNH", "MA", "PG", "JNJ", "HD", "MRK", "COST", "ABBV", "CVX", "CRM", "BAC", "AMD", "PEP", "KO", "NFLX", "ADBE", "DIS", "MCD", "CSCO", "TMUS", "ABT", "INTC", "INTU", "CMCSA", "PFE", "NKE", "WFC", "QCOM", "TXN", "DHR", "PM", "UNP", "IBM", "AMGN", "GE", "HON", "BA", "SPY", "QQQ", "UBER", "PLTR",
@@ -143,9 +140,8 @@ LISTE_DOVIZ = [
 ]
 
 # ==============================================================================
-# 5. BIST (HATALI HİSSELER TEMİZLENDİ)
+# 5. BIST (HATALILAR TEMİZLENDİ)
 # ==============================================================================
-# Çıkarılanlar: IDEAS, ITTFH, ALMAD, GRTRK, PLAT, ISKUR, QNBFB, QNBFL, DAGHL, CPE, LPI, PEGYO, FZCMI, MRO, ESTE, LORAS, MIPAZ, PDCE, DFS, CHK, OAS, WAKP, HES, WLL, YAC
 LISTE_BIST = [
     "A1CAP.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "ADGYO.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AGROT.IS", "AGYO.IS", "AHGAZ.IS", "AKBNK.IS", "AKCNS.IS", "AKENR.IS", "AKFGY.IS", "AKFYE.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", "AKSEN.IS", "AKSGY.IS", "AKSUE.IS", "AKYHO.IS", "ALARK.IS", "ALBRK.IS", "ALCAR.IS", "ALCTL.IS", "ALFAS.IS", "ALGYO.IS", "ALKA.IS", "ALKIM.IS", "ALTNY.IS", "ANELE.IS", "ANGEN.IS", "ANHYT.IS", "ANSGR.IS", "ARASE.IS", "ARCLK.IS", "ARDYZ.IS", "ARENA.IS", "ARSAN.IS", "ARZUM.IS", "ASELS.IS", "ASGYO.IS", "ASTOR.IS", "ASUZU.IS", "ATAGY.IS", "ATAKP.IS", "ATATP.IS", "ATEKS.IS", "ATLAS.IS", "ATSYH.IS", "AVGYO.IS", "AVHOL.IS", "AVOD.IS", "AVPGY.IS", "AVTUR.IS", "AYCES.IS", "AYDEM.IS", "AYEN.IS", "AYES.IS", "AYGAZ.IS", "AZTEK.IS", 
     "BAGFS.IS", "BAKAB.IS", "BALAT.IS", "BANVT.IS", "BARMA.IS", "BASCM.IS", "BASGZ.IS", "BAYRK.IS", "BEGYO.IS", "BERA.IS", "BEYAZ.IS", "BFREN.IS", "BIENY.IS", "BIGCH.IS", "BIMAS.IS", "BINHO.IS", "BIOEN.IS", "BIZIM.IS", "BJKAS.IS", "BLCYT.IS", "BMSCH.IS", "BMSTL.IS", "BNTAS.IS", "BOBET.IS", "BORLS.IS", "BOSSA.IS", "BRISA.IS", "BRKO.IS", "BRKSN.IS", "BRKVY.IS", "BRLSM.IS", "BRMEN.IS", "BRSAN.IS", "BRYAT.IS", "BSOKE.IS", "BTCIM.IS", "BUCIM.IS", "BURCE.IS", "BURVA.IS", "BVSAN.IS", "BYDNR.IS", 
@@ -223,7 +219,6 @@ try:
     try:
         session = requests.Session()
         r = session.get("https://altin.doviz.com/", headers=headers, timeout=20)
-        from bs4 import BeautifulSoup # Local import
         if r.status_code == 200:
             soup = BeautifulSoup(r.content, "html.parser")
             for satir in soup.find_all("tr"):
