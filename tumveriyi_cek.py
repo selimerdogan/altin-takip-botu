@@ -61,8 +61,9 @@ def get_sp500_dynamic():
         
         print(f"   -> CSV'den {len(liste_sp500)} şirket okundu. Fiyatlar Yahoo'dan çekiliyor...")
         
-        # Yahoo'dan fiyatları çek
-        df_yahoo = yf.download(liste_sp500, period="5d", progress=False, threads=True, auto_adjust=True)['Close']
+       # Yahoo'dan fiyatları çek (ignore_tz ve progress=False zaten var, sessiz mod)
+# WBA gibi delist olanlar otomatik atlanır, kırmızı yazı çıkabilir ama işlem durmaz.
+df_yahoo = yf.download(liste_sp500, period="5d", progress=False, threads=True, auto_adjust=True, ignore_tz=True)['Close']
         
         if not df_yahoo.empty:
             son_fiyatlar = df_yahoo.ffill().iloc[-1]
@@ -248,3 +249,4 @@ try:
 except Exception as e:
     print(f"KRİTİK HATA: {e}")
     sys.exit(1)
+
