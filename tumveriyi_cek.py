@@ -8,6 +8,7 @@ import yfinance as yf
 import pandas as pd
 import io
 import warnings
+import json
 
 # Gereksiz uyarıları kapat
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -43,46 +44,56 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. BIST (İŞ YATIRIM - EN SAĞLAM KAYNAK)
+# 1. BIST (TRADINGVIEW SCANNER API - EN SAĞLAM KAYNAK)
 # ==============================================================================
-def get_bist_isyatirim():
+def get_bist_tradingview():
     """
-    İş Yatırım'ın canlı veri servisinden tüm hisseleri JSON olarak çeker.
-    HTML kazımaz, çok hızlı ve güvenilirdir.
+    TradingView'in gizli tarayıcı API'sini kullanır.
+    Tüm BIST hisselerini (Halka arzlar dahil) tek seferde JSON olarak çeker.
+    Engellenme riski çok düşüktür.
     """
-    print("1. Borsa İstanbul (İş Yatırım) taranıyor...")
-    # İş Yatırım'ın tüm hisse fiyatlarını veren gizli hazinesi:
-    url = "https://www.isyatirim.com.tr/_layouts/15/IsYatirim.Website/Common/Data.aspx/HisseFiyatlari"
+    print("1. Borsa İstanbul (TradingView Scanner) taranıyor...")
+    url = "https://scanner.tradingview.com/turkey/scan"
     
-    # Parametreler (periyot=1440 günlük demektir ama gün içi son fiyatı verir)
-    params = {"period": "1440"}
+    # TradingView'a "Bana BIST'teki tüm hisseleri ver" diyen sorgu
+    payload = {
+        "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr", "fund"]}],
+        "options": {"lang": "tr"},
+        "symbols": {"query": {"types": []}, "tickers": []},
+        "columns": ["name", "close", "change", "volume"],
+        "sort": {"sortBy": "name", "sortOrder": "asc"},
+        "range": [0, 600] # İlk 600 hisseyi getir (BIST'in tamamı sığar)
+    }
     
     data_bist = {}
+    
     try:
-        r = requests.get(url, params=params, headers=headers_general, timeout=20)
+        # JSON formatında POST isteği atıyoruz
+        r = requests.post(url, json=payload, headers=headers_general, timeout=20)
+        
         if r.status_code == 200:
             json_data = r.json()
-            # İş Yatırım verisi: {"value": [{"Code": "THYAO", "LastPrice": 274.5, ...}]}
-            hisseler = json_data.get('value', [])
+            # Yapı: {"data": [{"d": ["THYAO", 274.5, ...]}, ...]}
+            hisseler = json_data.get('data', [])
             
             for h in hisseler:
-                kod = h.get('Code')
-                fiyat = h.get('LastPrice') # Son işlem fiyatı
+                try:
+                    # TradingView verisi liste olarak gelir: [isim, fiyat, değişim, hacim]
+                    raw_data = h.get('d', [])
+                    if len(raw_data) > 1:
+                        kod = raw_data[0]
+                        fiyat = raw_data[1]
+                        
+                        if kod and fiyat:
+                            data_bist[kod] = float(fiyat)
+                except: continue
                 
-                # Fiyat 0 değilse ve kod geçerliyse al
-                if kod and fiyat:
-                    # Virgül/Nokta kontrolü (Bazen sayı, bazen string gelebilir)
-                    if isinstance(fiyat, str):
-                        fiyat = float(fiyat.replace(',', '.'))
-                    
-                    if fiyat > 0:
-                        data_bist[kod] = float(fiyat)
-            
-            print(f"   -> ✅ İş Yatırım Başarılı: {len(data_bist)} hisse.")
+            print(f"   -> ✅ TradingView Başarılı: {len(data_bist)} hisse çekildi.")
         else:
-            print(f"   -> ⚠️ İş Yatırım Hatası: {r.status_code}")
+            print(f"   -> ⚠️ TradingView Hatası: {r.status_code}")
+            
     except Exception as e:
-        print(f"   -> ⚠️ İş Yatırım Bağlantı Hatası: {e}")
+        print(f"   -> ⚠️ TradingView Bağlantı Hatası: {e}")
         
     return data_bist
 
@@ -98,8 +109,11 @@ def get_sp500_dynamic():
         s = requests.get(url_csv).content
         df = pd.read_csv(io.StringIO(s.decode('utf-8')))
         
-        # Yahoo formatı
         liste_sp500 = [x.replace('.', '-') for x in df['Symbol'].tolist()]
+        
+        # Hatalı olanları çıkar
+        black_list = ['WBA', 'DISCA', 'DISCK']
+        liste_sp500 = [x for x in liste_sp500 if x not in black_list]
         
         print(f"   -> CSV'den {len(liste_sp500)} şirket okundu. Fiyatlar Yahoo'dan çekiliyor...")
         
@@ -179,8 +193,8 @@ def get_tefas_data():
                     fonlar = {}
                     for f in d:
                         try:
-                            val = float(str(f['FIYAT']).replace(',', '.'))
-                            fonlar[f['FONKODU']] = val
+                            raw_fiyat = str(f['FIYAT']).replace(',', '.')
+                            fonlar[f['FONKODU']] = float(raw_fiyat)
                         except: continue
                     print(f"   -> ✅ TEFAS Başarılı ({tarih_str}): {len(fonlar)} fon.")
                     return fonlar
@@ -230,14 +244,14 @@ def get_altin_site():
 # ANA ÇALIŞMA ALANI
 # ==============================================================================
 try:
-    print("--- FİNAL FİNANS BOTU (İŞ YATIRIM + CMC + TEFAS) ---")
+    print("--- FİNAL FİNANS BOTU (TRADINGVIEW + CSV + CMC) ---")
     
-    d_bist = get_bist_isyatirim()  # İş Yatırım
-    d_abd = get_sp500_dynamic()    # GitHub CSV -> Yahoo
-    d_kripto = get_crypto_cmc(250) # CMC API
-    d_fon = get_tefas_data()       # TEFAS API
-    d_doviz = get_doviz_yahoo()    # Yahoo
-    d_altin = get_altin_site()     # Scraping
+    d_bist = get_bist_tradingview() # TradingView Motoru
+    d_abd = get_sp500_dynamic()     # CSV -> Yahoo
+    d_kripto = get_crypto_cmc(250)  # CMC API
+    d_fon = get_tefas_data()        # TEFAS API
+    d_doviz = get_doviz_yahoo()     # Yahoo
+    d_altin = get_altin_site()      # Scraping
 
     final_paket = {
         "borsa_tr_tl": d_bist,
