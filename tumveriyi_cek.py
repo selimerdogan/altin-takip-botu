@@ -43,18 +43,17 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. BIST (TRADINGVIEW SCANNER - HİSSELER)
+# 1. BIST (TRADINGVIEW SCANNER)
 # ==============================================================================
 def get_bist_tradingview():
     print("1. Borsa İstanbul (TradingView) taranıyor...")
     url = "https://scanner.tradingview.com/turkey/scan"
-    # Sadece Hisseleri (stock) ve Depo Sertifikalarını (dr) iste
     payload = {
         "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr"]}],
         "options": {"lang": "tr"},
         "symbols": {"query": {"types": []}, "tickers": []},
         "columns": ["name", "close"],
-        "range": [0, 1000] # BIST'teki tüm hisseleri kapsar
+        "range": [0, 1000]
     }
     data_bist = {}
     try:
@@ -64,7 +63,6 @@ def get_bist_tradingview():
                 try:
                     d = h.get('d', [])
                     if len(d) > 1:
-                        # d[0]: İsim (THYAO), d[1]: Fiyat
                         data_bist[d[0]] = float(d[1])
                 except: continue
             print(f"   -> ✅ TradingView Hisse: {len(data_bist)} adet.")
@@ -73,22 +71,17 @@ def get_bist_tradingview():
     return data_bist
 
 # ==============================================================================
-# 2. YATIRIM FONLARI (TRADINGVIEW SCANNER - FONLAR) - YENİ!
+# 2. YATIRIM FONLARI (TRADINGVIEW SCANNER)
 # ==============================================================================
 def get_fon_tradingview():
-    """
-    TEFAS yerine TradingView Scanner kullanıyoruz.
-    Filtre olarak 'fund' (fon) seçiyoruz.
-    """
     print("2. Yatırım Fonları (TradingView) taranıyor...")
     url = "https://scanner.tradingview.com/turkey/scan"
-    # Sadece Fonları (fund) iste
     payload = {
         "filter": [{"left": "type", "operation": "equal", "right": "fund"}],
         "options": {"lang": "tr"},
         "symbols": {"query": {"types": []}, "tickers": []},
         "columns": ["name", "close"],
-        "range": [0, 2000] # Türkiye'de çok fon var, limiti yüksek tuttum
+        "range": [0, 2000]
     }
     data_fon = {}
     try:
@@ -98,14 +91,9 @@ def get_fon_tradingview():
                 try:
                     d = h.get('d', [])
                     if len(d) > 1:
-                        kod = d[0]   # Örn: TCD
-                        fiyat = d[1] # Örn: 45.20
-                        if fiyat:
-                            data_fon[kod] = float(fiyat)
+                        data_fon[d[0]] = float(d[1])
                 except: continue
             print(f"   -> ✅ TradingView Fon: {len(data_fon)} adet.")
-        else:
-            print(f"   -> ⚠️ TV Fon Hatası: {r.status_code}")
     except Exception as e:
         print(f"   -> ⚠️ TV Fon Bağlantı Hatası: {e}")
     return data_fon
@@ -122,7 +110,6 @@ def get_sp500_dynamic():
         df = pd.read_csv(io.StringIO(s.decode('utf-8')))
         liste_sp500 = [x.replace('.', '-') for x in df['Symbol'].tolist()]
         
-        # Hatalıları çıkar
         black_list = ['WBA', 'DISCA', 'DISCK']
         liste_sp500 = [x for x in liste_sp500 if x not in black_list]
 
@@ -200,31 +187,37 @@ def get_altin_site():
     return data
 
 # ==============================================================================
-# KAYIT
+# KAYIT (SUBCOLLECTION MİMARİSİ - HATA ÖNLEYİCİ)
 # ==============================================================================
 try:
-    print("--- ULTIMATE FİNANS BOTU (FULL TRADINGVIEW MOTORU) ---")
+    print("--- FİNANS BOTU (SUBCOLLECTION MİMARİSİ) ---")
     
     final_paket = {
         "borsa_tr_tl": get_bist_tradingview(),
-        "fon_tl": get_fon_tradingview(), # YENİ MOTOR
+        "fon_tl": get_fon_tradingview(),
         "borsa_abd_usd": get_sp500_dynamic(),
         "kripto_usd": get_crypto_cmc(250),
         "doviz_tl": get_doviz_yahoo(),
-        "altin_tl": get_altin_site()
+        "altin_tl": get_altin_site(),
+        "timestamp": firestore.SERVER_TIMESTAMP # Sunucu saati
     }
 
     if any(final_paket.values()):
         simdi = datetime.now()
-        doc_id = simdi.strftime("%Y-%m-%d")
-        saat = simdi.strftime("%H:%M")
+        bugun_tarih = simdi.strftime("%Y-%m-%d")
+        su_an_saat = simdi.strftime("%H:%M")
         
-        db.collection(u'market_history').document(doc_id).set(
-            {u'hourly': {saat: final_paket}}, merge=True
-        )
+        # 1. Ana Gün Dokümanı (Varlığını garantiye al)
+        day_ref = db.collection(u'market_history').document(bugun_tarih)
+        day_ref.set({'date': bugun_tarih}, merge=True)
         
-        total = sum(len(v) for v in final_paket.values())
-        print(f"🎉 BAŞARILI: [{doc_id} - {saat}] Toplam {total} veri kaydedildi.")
+        # 2. Saati ALT KOLEKSİYON olarak ekle (LIMITSİZ YAPI)
+        # Yol: market_history -> 2025-11-28 -> snapshots -> 14:00
+        hour_ref = day_ref.collection(u'snapshots').document(su_an_saat)
+        hour_ref.set(final_paket)
+        
+        total = sum(len(v) for k,v in final_paket.items() if isinstance(v, dict))
+        print(f"🎉 BAŞARILI: [{bugun_tarih} - {su_an_saat}] Toplam {total} veri 'snapshots' altına kaydedildi.")
     else:
         print("❌ HATA: Veri yok!")
         sys.exit(1)
