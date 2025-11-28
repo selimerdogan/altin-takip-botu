@@ -5,29 +5,32 @@ from firebase_admin import credentials, firestore
 from datetime import datetime, timedelta
 import sys
 import os
-import yfinance as yf
-import pandas as pd
+import time
 import warnings
-import json
 
 # Gereksiz uyarıları kapat
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 # --- AYARLAR ---
 headers_general = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
 }
 
 # --- KİMLİK KONTROLLERİ ---
-# 1. Firebase Anahtarı
 if not os.path.exists("serviceAccountKey.json"):
     print("HATA: serviceAccountKey.json bulunamadı!")
     sys.exit(1)
 
-# 2. CoinMarketCap Anahtarı (Ortam değişkeninden al)
+# 1. CMC ANAHTARI
 CMC_API_KEY = os.environ.get('CMC_API_KEY')
 if not CMC_API_KEY:
-    print("UYARI: CMC_API_KEY bulunamadı! Kripto verileri çekilemeyebilir.")
+    print("UYARI: CMC_API_KEY yok! Kriptolar çekilemeyecek.")
+
+# 2. FMP ANAHTARI (YENİ)
+FMP_API_KEY = os.environ.get('FMP_API_KEY')
+if not FMP_API_KEY:
+    print("KRİTİK HATA: FMP_API_KEY bulunamadı! GitHub Secrets'a ekleyin.")
+    sys.exit(1)
 
 try:
     if not firebase_admin._apps:
@@ -46,95 +49,131 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. KRİPTO PARALAR (COINMARKETCAP - API MODU)
+# 1. KRİPTO PARALAR (COINMARKETCAP API)
 # ==============================================================================
 def get_crypto_from_cmc(limit=250):
-    """
-    CoinMarketCap API kullanarak en değerli 'limit' kadar coini çeker.
-    """
-    if not CMC_API_KEY:
-        print("   -> ❌ CMC API Key eksik, kripto atlanıyor.")
-        return {}
-
+    """En iyi 250 kripto parayı CMC'den çeker."""
+    if not CMC_API_KEY: return {}
+    
     url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest'
-    
-    parameters = {
-        'start': '1',
-        'limit': str(limit),
-        'convert': 'USD'
-    }
-    
-    headers = {
-        'Accepts': 'application/json',
-        'X-CMC_PRO_API_KEY': CMC_API_KEY,
-    }
-
+    parameters = {'start': '1', 'limit': str(limit), 'convert': 'USD'}
+    headers = {'Accepts': 'application/json', 'X-CMC_PRO_API_KEY': CMC_API_KEY}
     data_kripto = {}
 
     try:
-        print(f"   -> CoinMarketCap'ten Top {limit} coin isteniyor...")
-        session = requests.Session()
-        response = session.get(url, headers=headers, params=parameters)
-        
-        if response.status_code == 200:
-            data = response.json()['data']
-            
+        print(f"   -> CMC: Top {limit} coin çekiliyor...")
+        r = requests.get(url, headers=headers, params=parameters)
+        if r.status_code == 200:
+            data = r.json()['data']
             for coin in data:
                 symbol = coin['symbol']
-                # Fiyat 'quote' -> 'USD' -> 'price' içindedir
                 price = coin['quote']['USD']['price']
-                
-                # İsimlendirme standardımız: BTC -> BTC-USD (Yahoo ile uyumlu olsun diye -USD ekleyebiliriz veya sade bırakabiliriz)
-                # Senin sistemin önceki verilerle uyumlu olsun diye '-USD' ekliyorum.
-                # İstersen `key_name = symbol` yapabilirsin.
-                key_name = f"{symbol}-USD"
-                
-                if price:
-                    data_kripto[key_name] = round(float(price), 4)
-            
-            print(f"   -> ✅ CMC Başarılı! {len(data_kripto)} adet coin çekildi.")
+                # İsim standardı: BTC-USD
+                data_kripto[f"{symbol}-USD"] = round(float(price), 4)
+            print(f"   -> ✅ CMC Başarılı: {len(data_kripto)} adet.")
         else:
-            print(f"   -> ⚠️ CMC Hatası: {response.status_code} - {response.text}")
-
+            print(f"   -> ⚠️ CMC Hatası: {r.status_code}")
     except Exception as e:
         print(f"   -> ⚠️ CMC Bağlantı Hatası: {e}")
-        
     return data_kripto
 
 # ==============================================================================
-# 2. YATIRIM FONLARI (YAHOO)
+# 2. HİSSE & DÖVİZ (FINANCIAL MODELING PREP API)
 # ==============================================================================
-LISTE_FON = [
-    "AFT.IS", "MAC.IS", "TCD.IS", "YAY.IS", "AFA.IS", "IPJ.IS", "TGE.IS", "NNF.IS", "BUY.IS", "HVS.IS",
-    "TI1.IS", "TI2.IS", "TI3.IS", "KUB.IS", "GMR.IS", "TKF.IS", "TCA.IS", "ZPE.IS", "ZDZ.IS", "UPH.IS",
-    "GSP.IS", "FIL.IS", "FID.IS", "RBH.IS", "MRI.IS", "EID.IS", "SUA.IS", "ST1.IS", "KTM.IS", "MPS.IS",
-    "DBH.IS", "TDG.IS", "TTE.IS", "YDI.IS", "AES.IS", "IHK.IS", "IDH.IS", "OKD.IS", "KPC.IS", "KRV.IS",
-    "GBC.IS", "HKH.IS", "ACC.IS", "FPH.IS", "GL1.IS", "TUA.IS", "TPZ.IS", "IJZ.IS", "IIH.IS", "ICZ.IS",
-    "OJT.IS", "AOY.IS", "AAV.IS", "YAS.IS", "YAK.IS", "NHY.IS", "GOH.IS", "FIB.IS", "TIV.IS", "TI6.IS",
-    "TI7.IS", "RPD.IS", "RИК.IS", "ZJL.IS", "ZHB.IS", "ZMB.IS", "YTD.IS", "KZL.IS", "NRC.IS", "NJR.IS"
-]
+def get_data_from_fmp(sembol_listesi):
+    """
+    FMP API kullanarak ABD, BIST ve Döviz verilerini çeker.
+    URL çok uzamasın diye listeyi 50'şerli paketlere böler.
+    """
+    tum_veriler = {}
+    
+    # Listeyi parçalara ayıran yardımcı fonksiyon
+    def parcalara_bol(liste, n):
+        for i in range(0, len(liste), n):
+            yield liste[i:i + n]
+
+    paketler = list(parcalara_bol(sembol_listesi, 50))
+    print(f"   -> FMP API: Toplam {len(sembol_listesi)} varlık, {len(paketler)} pakette çekilecek...")
+    
+    for i, paket in enumerate(paketler):
+        # Sembolleri virgülle birleştir
+        sembol_string = ",".join(paket)
+        url = f"https://financialmodelingprep.com/api/v3/quote/{sembol_string}?apikey={FMP_API_KEY}"
+        
+        try:
+            r = requests.get(url, timeout=20)
+            if r.status_code == 200:
+                data = r.json()
+                for item in data:
+                    symbol = item.get('symbol')
+                    price = item.get('price')
+                    if symbol and price:
+                        tum_veriler[symbol] = price
+            else:
+                print(f"      ⚠️ Paket {i+1} FMP Hatası: {r.status_code}")
+        except Exception as e:
+            print(f"      ⚠️ FMP Bağlantı Hatası: {e}")
+            
+    return tum_veriler
 
 # ==============================================================================
-# 3. ABD BORSASI (S&P 500)
+# 3. YATIRIM FONLARI (TEFAS)
 # ==============================================================================
+def get_tefas_data():
+    url_api = "https://www.tefas.gov.tr/api/DB/BindComparisonFundReturns"
+    url_home = "https://www.tefas.gov.tr/FonKarsilastirma.aspx"
+    data_fon = {}
+    session = requests.Session()
+    tefas_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": "https://www.tefas.gov.tr/FonKarsilastirma.aspx",
+        "Origin": "https://www.tefas.gov.tr", "Content-Type": "application/json; charset=UTF-8"
+    }
+    try:
+        session.get(url_home, headers=tefas_headers, timeout=15)
+        simdi = datetime.now()
+        for i in range(7):
+            tarih_obj = simdi - timedelta(days=i)
+            # Yıl koruması
+            if tarih_obj.year > datetime.now().year: tarih_obj = tarih_obj.replace(year=datetime.now().year)
+            tarih_str = tarih_obj.strftime("%d.%m.%Y")
+            
+            payload = { "calismatipi": "2", "fontip": "YAT", "bastarih": tarih_str, "bittarih": tarih_str }
+            try:
+                r = session.post(url_api, json=payload, headers=tefas_headers, timeout=30)
+                if r.status_code == 200:
+                    d = r.json().get('data', [])
+                    if d and len(d) > 50:
+                        for f in d:
+                            if f.get('FONKODU') and f.get('FIYAT'):
+                                data_fon[f['FONKODU']] = float(str(f['FIYAT']).replace(',', '.'))
+                        print(f"   -> ✅ TEFAS Başarılı ({tarih_str}): {len(data_fon)} adet fon.")
+                        return data_fon
+            except: continue
+    except: pass
+    return {}
+
+# ==============================================================================
+# LİSTELER (FMP UYUMLU FORMAT)
+# ==============================================================================
+
+# ABD (S&P 500'den Örnekler - FMP Limitsiz ise 500'ünü de koyabilirsin)
+# FMP Formatı: AAPL, MSFT (Yahoo ile aynı)
 LISTE_ABD = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "BRK-B", "LLY", "AVGO", "V", "JPM", "XOM", "WMT", "UNH", "MA", "PG", "JNJ", "HD", "MRK", "COST", "ABBV", "CVX", "CRM", "BAC", "AMD", "PEP", "KO", "NFLX", "ADBE", "DIS", "MCD", "CSCO", "TMUS", "ABT", "INTC", "INTU", "CMCSA", "PFE", "NKE", "WFC", "QCOM", "TXN", "DHR", "PM", "UNP", "IBM", "AMGN", "GE", "HON", "BA", "SPY", "QQQ", "UBER", "PLTR",
     "LIN", "ACN", "RTX", "VZ", "T", "CAT", "LOW", "BKNG", "NEE", "GS", "MS", "BMY", "DE", "MDT", "SCHW", "BLK", "TJX", "PGR", "COP", "ISRG", "LMT", "ADP", "AXP", "MMC", "GILD", "VRTX", "C", "MDLZ", "ADI", "REGN", "LRCX", "CI", "CVS", "BSX", "ZTS", "AMT", "ETN", "SLB", "FI", "BDX", "SYK", "CB", "EOG", "TM", "SO", "CME", "MU", "KLAC", "PANW", "MO", "SHW", "SNPS", "EQIX", "CDNS", "ITW", "DUK", "CL", "APH", "PYPL", "CSX", "PH", "TGT", "USB", "ICE", "NOC", "WM", "FCX", "GD", "NXPI", "ORLY", "HCA", "MCK", "EMR", "MAR", "PNC", "PSX", "BDX", "ROP", "NSC", "GM", "FDX", "MCO", "AFL", "CARR", "ECL", "APD", "AJG", "MSI", "AZO", "TT", "WMB", "TFC", "COF", "PCAR", "D", "SRE", "AEP", "HLT", "O", "TRV", "MET", "PSA", "PAYX", "ROST", "KMB", "JCI", "URI", "ALL", "PEG", "ED", "XEL", "GWW", "YUM", "FAST", "WELL", "AMP", "DLR", "VLO", "AME", "CMI", "FIS", "ILMN", "AIG", "KR", "PPG", "KMI", "EXC", "LUV", "DAL"
 ]
 
-# ==============================================================================
-# 4. DÖVİZ
-# ==============================================================================
+# DÖVİZ (FMP Formatı: EURUSD, USDTRY - Slaş veya =X yok!)
 LISTE_DOVIZ = [
-    "USDTRY=X", "EURTRY=X", "GBPTRY=X", "CHFTRY=X", "CADTRY=X", "JPYTRY=X", "AUDTRY=X",
-    "EURUSD=X", "GBPUSD=X", "JPY=X", "DX-Y.NYB"
+    "USDTRY", "EURTRY", "GBPTRY", "CHFTRY", "CADTRY", "JPYTRY", "AUDTRY",
+    "EURUSD", "GBPUSD"
 ]
 
-# ==============================================================================
-# 5. BIST (TAM LİSTE)
-# ==============================================================================
+# BIST (FMP Formatı: THYAO.IS - Yahoo ile aynı)
 LISTE_BIST = [
-    "A1CAP.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "ADGYO.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AGROT.IS", "AGYO.IS", "AHGAZ.IS", "AKBNK.IS", "AKCNS.IS", "AKENR.IS", "AKFGY.IS", "AKFYE.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", "AKSEN.IS", "AKSGY.IS", "AKSUE.IS", "AKYHO.IS", "ALARK.IS", "ALBRK.IS", "ALCAR.IS", "ALCTL.IS", "ALFAS.IS", "ALGYO.IS", "ALKA.IS", "ALKIM.IS", "ALMAD.IS", "ALTNY.IS", "ANELE.IS", "ANGEN.IS", "ANHYT.IS", "ANSGR.IS", "ARASE.IS", "ARCLK.IS", "ARDYZ.IS", "ARENA.IS", "ARSAN.IS", "ARZUM.IS", "ASELS.IS", "ASGYO.IS", "ASTOR.IS", "ASUZU.IS", "ATAGY.IS", "ATAKP.IS", "ATATP.IS", "ATEKS.IS", "ATLAS.IS", "ATSYH.IS", "AVGYO.IS", "AVHOL.IS", "AVOD.IS", "AVPGY.IS", "AVTUR.IS", "AYCES.IS", "AYDEM.IS", "AYEN.IS", "AYES.IS", "AYGAZ.IS", "AZTEK.IS", 
+    "A1CAP.IS", "ACSEL.IS", "ADEL.IS", "ADESE.IS", "ADGYO.IS", "AEFES.IS", "AFYON.IS", "AGESA.IS", "AGHOL.IS", "AGROT.IS", "AGYO.IS", "AHGAZ.IS", "AKBNK.IS", "AKCNS.IS", "AKENR.IS", "AKFGY.IS", "AKFYE.IS", "AKGRT.IS", "AKMGY.IS", "AKSA.IS", "AKSEN.IS", "AKSGY.IS", "AKSUE.IS", "AKYHO.IS", "ALARK.IS", "ALBRK.IS", "ALCAR.IS", "ALCTL.IS", "ALFAS.IS", "ALGYO.IS", "ALKA.IS", "ALKIM.IS", "ALTNY.IS", "ANELE.IS", "ANGEN.IS", "ANHYT.IS", "ANSGR.IS", "ARASE.IS", "ARCLK.IS", "ARDYZ.IS", "ARENA.IS", "ARSAN.IS", "ARZUM.IS", "ASELS.IS", "ASGYO.IS", "ASTOR.IS", "ASUZU.IS", "ATAGY.IS", "ATAKP.IS", "ATATP.IS", "ATEKS.IS", "ATLAS.IS", "ATSYH.IS", "AVGYO.IS", "AVHOL.IS", "AVOD.IS", "AVPGY.IS", "AVTUR.IS", "AYCES.IS", "AYDEM.IS", "AYEN.IS", "AYES.IS", "AYGAZ.IS", "AZTEK.IS", 
     "BAGFS.IS", "BAKAB.IS", "BALAT.IS", "BANVT.IS", "BARMA.IS", "BASCM.IS", "BASGZ.IS", "BAYRK.IS", "BEGYO.IS", "BERA.IS", "BEYAZ.IS", "BFREN.IS", "BIENY.IS", "BIGCH.IS", "BIMAS.IS", "BINHO.IS", "BIOEN.IS", "BIZIM.IS", "BJKAS.IS", "BLCYT.IS", "BMSCH.IS", "BMSTL.IS", "BNTAS.IS", "BOBET.IS", "BORLS.IS", "BOSSA.IS", "BRISA.IS", "BRKO.IS", "BRKSN.IS", "BRKVY.IS", "BRLSM.IS", "BRMEN.IS", "BRSAN.IS", "BRYAT.IS", "BSOKE.IS", "BTCIM.IS", "BUCIM.IS", "BURCE.IS", "BURVA.IS", "BVSAN.IS", "BYDNR.IS", 
     "CANTE.IS", "CASA.IS", "CCOLA.IS", "CELHA.IS", "CEMAS.IS", "CEMTS.IS", "CEOEM.IS", "CIMSA.IS", "CLEBI.IS", "CMBTN.IS", "CMENT.IS", "CONSE.IS", "COSMO.IS", "CRDFA.IS", "CRFSA.IS", "CUSAN.IS", "CVKMD.IS", "CWENE.IS", 
     "DAPGM.IS", "DARDL.IS", "DENGE.IS", "DERHL.IS", "DERIM.IS", "DESA.IS", "DESPC.IS", "DEVA.IS", "DGATE.IS", "DGGYO.IS", "DGNMO.IS", "DIRIT.IS", "DITAS.IS", "DMSAS.IS", "DNISI.IS", "DOAS.IS", "DOBUR.IS", "DOCO.IS", "DOGUB.IS", "DOHOL.IS", "DOKTA.IS", "DURDO.IS", "DYOBY.IS", "DZGYO.IS", 
@@ -165,54 +204,39 @@ LISTE_BIST = [
 # ==============================================================================
 
 try:
-    print("--- MEGA FİNANS BOTU (COINMARKETCAP + YAHOO + TEFAS) ---")
+    print("--- MEGA FİNANS BOTU (FMP + CMC + TEFAS) ---")
     
     # 1. KRİPTO (CMC)
     data_kripto = get_crypto_from_cmc(250)
     
-    # 2. YAHOO (BIST, ABD, DÖVİZ, FONLAR)
-    # Kripto listesini Yahoo'dan siliyoruz çünkü CMC'den alıyoruz.
-    tum_semboller = LISTE_ABD + LISTE_DOVIZ + LISTE_BIST + LISTE_FON
+    # 2. TEFAS FONLARI
+    print("2. Yatırım fonları taranıyor...")
+    data_fonlar = get_tefas_data()
     
-    print(f"Yahoo Varlık Sayısı: {len(tum_semboller)} (Fonlar Dahil)")
+    # 3. FMP API (BIST, ABD, DÖVİZ)
+    print("3. Borsa ve Döviz verileri FMP API'den çekiliyor...")
     
-    print("Yahoo Finance verileri çekiliyor...")
-    # Fonlar için de .IS uzantılı olduğu için Yahoo işe yarar
-    df = yf.download(tum_semboller, period="5d", progress=False, threads=True, auto_adjust=True)['Close']
+    # FMP listesini birleştir
+    tum_fmp = LISTE_ABD + LISTE_DOVIZ + LISTE_BIST
+    fmp_sonuclar = get_data_from_fmp(tum_fmp)
     
     data_borsa_tr = {}
     data_borsa_abd = {}
     data_doviz = {}
-    data_fonlar = {}
     
-    if not df.empty:
-        df_dolu = df.ffill()
-        son_fiyatlar = df_dolu.iloc[-1]
-        
-        for sembol in tum_semboller:
-            try:
-                fiyat = son_fiyatlar.get(sembol)
-                if pd.notna(fiyat):
-                    fiyat = round(float(fiyat), 4)
-                    
-                    if sembol in LISTE_BIST:
-                        data_borsa_tr[sembol.replace(".IS", "")] = fiyat
-                    elif sembol in LISTE_ABD:
-                        data_borsa_abd[sembol] = fiyat
-                    elif sembol in LISTE_DOVIZ:
-                        data_doviz[sembol.replace("TRY=X", "").replace("=X", "")] = fiyat
-                    elif sembol in LISTE_FON:
-                        data_fonlar[sembol.replace(".IS", "")] = fiyat
-            except: continue
+    # FMP verilerini kutulara dağıt
+    for sembol, fiyat in fmp_sonuclar.items():
+        if sembol in LISTE_BIST:
+            data_borsa_tr[sembol.replace(".IS", "")] = fiyat
+        elif sembol in LISTE_ABD:
+            data_borsa_abd[sembol] = fiyat
+        elif sembol in LISTE_DOVIZ:
+            data_doviz[sembol.replace("TRY", "")] = fiyat # USDTRY -> USD
             
-    print(f"   -> ✅ Yahoo Bitti:")
-    print(f"      - BIST: {len(data_borsa_tr)}")
-    print(f"      - ABD: {len(data_borsa_abd)}")
-    print(f"      - Fonlar: {len(data_fonlar)}")
-    print(f"      - Döviz: {len(data_doviz)}")
+    print(f"   -> ✅ FMP Bitti: BIST({len(data_borsa_tr)}), ABD({len(data_borsa_abd)}), Döviz({len(data_doviz)})")
 
-    # 3. ALTIN
-    print("Altın verileri çekiliyor...")
+    # 4. ALTIN (Siteden Kazıma)
+    print("4. Altın verileri çekiliyor...")
     data_altin = {}
     try:
         session = requests.Session()
@@ -232,11 +256,11 @@ try:
     except: pass
     print(f"   -> ✅ Altın Bitti: {len(data_altin)} adet")
 
-    # 4. KAYIT
+    # 5. KAYIT
     final_paket = {
         "borsa_tr_tl": data_borsa_tr,
         "borsa_abd_usd": data_borsa_abd,
-        "kripto_usd": data_kripto, # CMC verisi buraya geldi
+        "kripto_usd": data_kripto,
         "doviz_tl": data_doviz,
         "altin_tl": data_altin,
         "fon_tl": data_fonlar
@@ -250,7 +274,7 @@ try:
         db.collection(u'market_history').document(bugun_tarih).set(
             {u'hourly': {su_an_saat_dakika: final_paket}}, merge=True
         )
-        print(f"🎉 BAŞARILI: [{bugun_tarih} - {su_an_saat_dakika}] CMC Dahil Tüm Veriler Kaydedildi.")
+        print(f"🎉 BAŞARILI: [{bugun_tarih} - {su_an_saat_dakika}] FMP + CMC + TEFAS Kaydedildi.")
     else:
         print("❌ HATA: Veri yok!")
         sys.exit(1)
