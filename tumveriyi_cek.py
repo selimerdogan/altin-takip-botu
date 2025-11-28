@@ -1,5 +1,4 @@
 import requests
-from bs4 import BeautifulSoup
 import firebase_admin
 from firebase_admin import credentials, firestore
 from datetime import datetime, timedelta
@@ -37,7 +36,6 @@ except Exception as e:
 def metni_sayiya_cevir(metin):
     try:
         temiz = str(metin).replace('TL', '').replace('USD', '').replace('$', '').replace('%', '').strip()
-        # Eğer virgül varsa noktaya çevir (Türkçe formatı düzelt)
         if "," in temiz:
             temiz = temiz.replace('.', '').replace(',', '.')
         return float(temiz)
@@ -45,40 +43,29 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. ABD BORSASI (GITHUB DATASETS - RAW CSV YÖNTEMİ)
+# 1. ABD BORSASI (GITHUB CSV - LİSTE TUTMAYA SON)
 # ==============================================================================
 def get_sp500_dynamic():
-    """
-    S&P 500 listesini Wikipedia yerine GitHub Datasets'ten (CSV) çeker.
-    Bu yöntem %100 kararlıdır, site değişti derdi yoktur.
-    """
-    print("1. ABD Borsası (S&P 500) Dataset'ten çekiliyor...")
-    
-    # Bu URL, S&P 500 şirketlerini içeren ve sürekli güncellenen ham veri dosyasıdır.
+    """Wikipedia yerine GitHub'daki ham CSV dosyasından güncel listeyi okur."""
+    print("1. ABD Borsası (S&P 500 - Dinamik CSV) taranıyor...")
+    # Bu CSV dosyası S&P 500 şirketlerini içerir ve sürekli güncellenir.
     url_csv = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
-    
     data_abd = {}
+    
     try:
-        # CSV dosyasını indir
         s = requests.get(url_csv).content
-        # Pandas ile CSV'yi oku
         df = pd.read_csv(io.StringIO(s.decode('utf-8')))
         
-        # 'Symbol' sütununu listeye çevir
-        liste_sp500 = df['Symbol'].tolist()
+        # Sembolleri al ve Yahoo formatına çevir (BRK.B -> BRK-B)
+        liste_sp500 = [x.replace('.', '-') for x in df['Symbol'].tolist()]
         
-        # Yahoo formatı düzeltmesi (Örn: BRK.B -> BRK-B)
-        liste_sp500 = [x.replace('.', '-') for x in liste_sp500]
+        print(f"   -> CSV'den {len(liste_sp500)} şirket okundu. Fiyatlar Yahoo'dan çekiliyor...")
         
-        print(f"   -> Listede {len(liste_sp500)} şirket bulundu. Fiyatlar Yahoo'dan çekiliyor...")
-        
-        # Fiyatları Yahoo'dan toplu çek
+        # Yahoo'dan fiyatları çek
         df_yahoo = yf.download(liste_sp500, period="5d", progress=False, threads=True, auto_adjust=True)['Close']
         
         if not df_yahoo.empty:
-            df_dolu = df_yahoo.ffill() # Boş günleri doldur
-            son_fiyatlar = df_dolu.iloc[-1]
-            
+            son_fiyatlar = df_yahoo.ffill().iloc[-1]
             for sembol in liste_sp500:
                 try:
                     fiyat = son_fiyatlar.get(sembol)
@@ -87,17 +74,16 @@ def get_sp500_dynamic():
                 except: continue
                 
         print(f"   -> ✅ S&P 500 Başarılı: {len(data_abd)} hisse.")
-        
     except Exception as e:
-        print(f"   -> ⚠️ ABD Veri Hatası: {e}")
+        print(f"   -> ⚠️ ABD Hata: {e}")
         
     return data_abd
 
 # ==============================================================================
-# 2. BIST (MYNET DİNAMİK - CANLI)
+# 2. BIST (MYNET API - LİSTE TUTMAYA SON)
 # ==============================================================================
 def get_bist_mynet():
-    """Mynet Canlı Borsa API'sinden anlık veri çeker. Liste tutmaz."""
+    """Mynet'ten anlık işlem gören tüm hisseleri çeker."""
     print("2. Borsa İstanbul (Mynet Dinamik) taranıyor...")
     url = "https://finans.mynet.com/borsa/canliborsa/data/"
     data_bist = {}
@@ -108,22 +94,22 @@ def get_bist_mynet():
             for sembol, detay in hisseler.items():
                 try:
                     fiyat = detay.get('lastPrice') or detay.get('last_price')
-                    # Filtre: 3-6 harfli olanlar (Hisse senedi)
+                    # Sadece 3-6 harfli hisse senetlerini al
                     if fiyat and sembol.isalpha() and 3 <= len(sembol) <= 6:
-                        fiyat_fl = metni_sayiya_cevir(fiyat)
-                        if fiyat_fl > 0: data_bist[sembol] = fiyat_fl
+                        f_float = metni_sayiya_cevir(fiyat)
+                        if f_float > 0: data_bist[sembol] = f_float
                 except: continue
             print(f"   -> ✅ Mynet Başarılı: {len(data_bist)} hisse.")
     except Exception as e:
-        print(f"   -> ⚠️ Mynet Hatası: {e}")
+        print(f"   -> ⚠️ Mynet Hata: {e}")
     return data_bist
 
 # ==============================================================================
-# 3. KRİPTO (COINMARKETCAP API)
+# 3. KRİPTO (CMC API)
 # ==============================================================================
 def get_crypto_cmc(limit=250):
     if not CMC_API_KEY:
-        print("   -> ⚠️ CMC Key Yok!")
+        print("   -> ⚠️ CMC Key Yok, atlanıyor.")
         return {}
     
     print(f"3. Kripto Piyasası (CMC Top {limit}) taranıyor...")
@@ -136,15 +122,17 @@ def get_crypto_cmc(limit=250):
         r = requests.get(url, headers=headers, params=params)
         if r.status_code == 200:
             for coin in r.json()['data']:
-                symbol = coin['symbol']
-                price = coin['quote']['USD']['price']
-                data_kripto[f"{symbol}-USD"] = round(float(price), 4)
+                try:
+                    symbol = coin['symbol']
+                    price = coin['quote']['USD']['price']
+                    data_kripto[f"{symbol}-USD"] = round(float(price), 4)
+                except: continue
             print(f"   -> ✅ CMC Başarılı: {len(data_kripto)} coin.")
     except: pass
     return data_kripto
 
 # ==============================================================================
-# 4. YATIRIM FONLARI (TEFAS - AKILLI MOD)
+# 4. FONLAR (TEFAS AKILLI MOD)
 # ==============================================================================
 def get_tefas_data():
     print("4. Yatırım Fonları (TEFAS) taranıyor...")
@@ -156,7 +144,6 @@ def get_tefas_data():
         "Origin": "https://www.tefas.gov.tr", "Content-Type": "application/json; charset=UTF-8"
     }
     session = requests.Session()
-    # Önce ana sayfaya git cookie al
     try:
         session.get("https://www.tefas.gov.tr/FonKarsilastirma.aspx", headers=tefas_headers, timeout=10)
     except: pass
@@ -166,7 +153,6 @@ def get_tefas_data():
         tarih = (simdi - timedelta(days=i))
         if tarih.year > datetime.now().year: tarih = tarih.replace(year=datetime.now().year)
         tarih_str = tarih.strftime("%d.%m.%Y")
-        
         try:
             payload = {"calismatipi": "2", "fontip": "YAT", "bastarih": tarih_str, "bittarih": tarih_str}
             r = session.post(url, json=payload, headers=tefas_headers, timeout=30)
@@ -176,9 +162,7 @@ def get_tefas_data():
                     fonlar = {}
                     for f in d:
                         try:
-                            # Fiyatı al ve düzelt
-                            raw_fiyat = str(f['FIYAT']).replace(',', '.')
-                            fonlar[f['FONKODU']] = float(raw_fiyat)
+                            fonlar[f['FONKODU']] = float(str(f['FIYAT']).replace(',', '.'))
                         except: continue
                     print(f"   -> ✅ TEFAS Başarılı ({tarih_str}): {len(fonlar)} fon.")
                     return fonlar
@@ -186,7 +170,7 @@ def get_tefas_data():
     return {}
 
 # ==============================================================================
-# 5. DÖVİZ (YAHOO) & ALTIN (SİTE)
+# 5. DÖVİZ & ALTIN
 # ==============================================================================
 def get_doviz_yahoo():
     print("5. Döviz Kurları çekiliyor...")
@@ -210,8 +194,7 @@ def get_altin_site():
     print("6. Altın verileri çekiliyor...")
     data = {}
     try:
-        session = requests.Session()
-        r = session.get("https://altin.doviz.com/", headers=headers_general, timeout=20)
+        r = requests.get("https://altin.doviz.com/", headers=headers_general)
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(r.content, "html.parser")
         for tr in soup.find_all("tr"):
@@ -219,8 +202,8 @@ def get_altin_site():
             if len(tds) > 2:
                 isim = tds[0].get_text(strip=True)
                 if "Ons" not in isim:
-                    fiyat = metni_sayiya_cevir(tds[2].get_text(strip=True))
-                    if fiyat > 0: data[isim] = fiyat
+                    f = metni_sayiya_cevir(tds[2].get_text(strip=True))
+                    if f > 0: data[isim] = f
     except: pass
     print(f"   -> ✅ Altın Bitti: {len(data)} adet.")
     return data
@@ -229,17 +212,15 @@ def get_altin_site():
 # ANA ÇALIŞMA ALANI
 # ==============================================================================
 try:
-    print("--- ULTIMATE FİNANS BOTU (DINAMIK CSV + API MODU) ---")
+    print("--- FİNAL FİNANS BOTU (LİSTESİZ & DİNAMİK) ---")
     
-    # Tüm modülleri çalıştır
-    d_abd = get_sp500_dynamic()    # GitHub CSV -> Yahoo
-    d_bist = get_bist_mynet()      # Mynet JSON
-    d_kripto = get_crypto_cmc(250) # CMC API
-    d_fon = get_tefas_data()       # TEFAS API
-    d_doviz = get_doviz_yahoo()    # Yahoo
-    d_altin = get_altin_site()     # Scraping
+    d_abd = get_sp500_dynamic()
+    d_bist = get_bist_mynet()
+    d_kripto = get_crypto_cmc(250)
+    d_fon = get_tefas_data()
+    d_doviz = get_doviz_yahoo()
+    d_altin = get_altin_site()
 
-    # Paketle
     final_paket = {
         "borsa_abd_usd": d_abd,
         "borsa_tr_tl": d_bist,
@@ -249,7 +230,6 @@ try:
         "altin_tl": d_altin
     }
 
-    # Kaydet
     if any(final_paket.values()):
         simdi = datetime.now()
         doc_id = simdi.strftime("%Y-%m-%d")
