@@ -43,12 +43,10 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. ABD BORSASI (GITHUB CSV - LİSTE TUTMAYA SON)
+# 1. ABD BORSASI (GITHUB CSV - S&P 500)
 # ==============================================================================
 def get_sp500_dynamic():
-    """Wikipedia yerine GitHub'daki ham CSV dosyasından güncel listeyi okur."""
     print("1. ABD Borsası (S&P 500 - Dinamik CSV) taranıyor...")
-    # Bu CSV dosyası S&P 500 şirketlerini içerir ve sürekli güncellenir.
     url_csv = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
     data_abd = {}
     
@@ -56,14 +54,13 @@ def get_sp500_dynamic():
         s = requests.get(url_csv).content
         df = pd.read_csv(io.StringIO(s.decode('utf-8')))
         
-        # Sembolleri al ve Yahoo formatına çevir (BRK.B -> BRK-B)
+        # Sembolleri al ve Yahoo formatına çevir
         liste_sp500 = [x.replace('.', '-') for x in df['Symbol'].tolist()]
         
         print(f"   -> CSV'den {len(liste_sp500)} şirket okundu. Fiyatlar Yahoo'dan çekiliyor...")
         
-       # Yahoo'dan fiyatları çek (ignore_tz ve progress=False zaten var, sessiz mod)
-# WBA gibi delist olanlar otomatik atlanır, kırmızı yazı çıkabilir ama işlem durmaz.
-df_yahoo = yf.download(liste_sp500, period="5d", progress=False, threads=True, auto_adjust=True, ignore_tz=True)['Close']
+        # WBA gibi hataları susturmak için sessiz modda indiriyoruz
+        df_yahoo = yf.download(liste_sp500, period="5d", progress=False, threads=True, auto_adjust=True)['Close']
         
         if not df_yahoo.empty:
             son_fiyatlar = df_yahoo.ffill().iloc[-1]
@@ -75,16 +72,16 @@ df_yahoo = yf.download(liste_sp500, period="5d", progress=False, threads=True, a
                 except: continue
                 
         print(f"   -> ✅ S&P 500 Başarılı: {len(data_abd)} hisse.")
+        
     except Exception as e:
         print(f"   -> ⚠️ ABD Hata: {e}")
         
     return data_abd
 
 # ==============================================================================
-# 2. BIST (MYNET API - LİSTE TUTMAYA SON)
+# 2. BIST (MYNET API - DİNAMİK)
 # ==============================================================================
 def get_bist_mynet():
-    """Mynet'ten anlık işlem gören tüm hisseleri çeker."""
     print("2. Borsa İstanbul (Mynet Dinamik) taranıyor...")
     url = "https://finans.mynet.com/borsa/canliborsa/data/"
     data_bist = {}
@@ -95,7 +92,6 @@ def get_bist_mynet():
             for sembol, detay in hisseler.items():
                 try:
                     fiyat = detay.get('lastPrice') or detay.get('last_price')
-                    # Sadece 3-6 harfli hisse senetlerini al
                     if fiyat and sembol.isalpha() and 3 <= len(sembol) <= 6:
                         f_float = metni_sayiya_cevir(fiyat)
                         if f_float > 0: data_bist[sembol] = f_float
@@ -163,7 +159,9 @@ def get_tefas_data():
                     fonlar = {}
                     for f in d:
                         try:
-                            fonlar[f['FONKODU']] = float(str(f['FIYAT']).replace(',', '.'))
+                            # Fiyatı al ve düzelt
+                            raw_fiyat = str(f['FIYAT']).replace(',', '.')
+                            fonlar[f['FONKODU']] = float(raw_fiyat)
                         except: continue
                     print(f"   -> ✅ TEFAS Başarılı ({tarih_str}): {len(fonlar)} fon.")
                     return fonlar
@@ -249,4 +247,3 @@ try:
 except Exception as e:
     print(f"KRİTİK HATA: {e}")
     sys.exit(1)
-
