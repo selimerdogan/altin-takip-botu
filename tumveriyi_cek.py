@@ -43,10 +43,54 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. ABD BORSASI (GITHUB CSV - S&P 500)
+# 1. BIST (İŞ YATIRIM - EN SAĞLAM KAYNAK)
+# ==============================================================================
+def get_bist_isyatirim():
+    """
+    İş Yatırım'ın canlı veri servisinden tüm hisseleri JSON olarak çeker.
+    HTML kazımaz, çok hızlı ve güvenilirdir.
+    """
+    print("1. Borsa İstanbul (İş Yatırım) taranıyor...")
+    # İş Yatırım'ın tüm hisse fiyatlarını veren gizli hazinesi:
+    url = "https://www.isyatirim.com.tr/_layouts/15/IsYatirim.Website/Common/Data.aspx/HisseFiyatlari"
+    
+    # Parametreler (periyot=1440 günlük demektir ama gün içi son fiyatı verir)
+    params = {"period": "1440"}
+    
+    data_bist = {}
+    try:
+        r = requests.get(url, params=params, headers=headers_general, timeout=20)
+        if r.status_code == 200:
+            json_data = r.json()
+            # İş Yatırım verisi: {"value": [{"Code": "THYAO", "LastPrice": 274.5, ...}]}
+            hisseler = json_data.get('value', [])
+            
+            for h in hisseler:
+                kod = h.get('Code')
+                fiyat = h.get('LastPrice') # Son işlem fiyatı
+                
+                # Fiyat 0 değilse ve kod geçerliyse al
+                if kod and fiyat:
+                    # Virgül/Nokta kontrolü (Bazen sayı, bazen string gelebilir)
+                    if isinstance(fiyat, str):
+                        fiyat = float(fiyat.replace(',', '.'))
+                    
+                    if fiyat > 0:
+                        data_bist[kod] = float(fiyat)
+            
+            print(f"   -> ✅ İş Yatırım Başarılı: {len(data_bist)} hisse.")
+        else:
+            print(f"   -> ⚠️ İş Yatırım Hatası: {r.status_code}")
+    except Exception as e:
+        print(f"   -> ⚠️ İş Yatırım Bağlantı Hatası: {e}")
+        
+    return data_bist
+
+# ==============================================================================
+# 2. ABD BORSASI (GITHUB CSV - S&P 500)
 # ==============================================================================
 def get_sp500_dynamic():
-    print("1. ABD Borsası (S&P 500 - Dinamik CSV) taranıyor...")
+    print("2. ABD Borsası (S&P 500 - Dinamik CSV) taranıyor...")
     url_csv = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
     data_abd = {}
     
@@ -54,13 +98,12 @@ def get_sp500_dynamic():
         s = requests.get(url_csv).content
         df = pd.read_csv(io.StringIO(s.decode('utf-8')))
         
-        # Sembolleri al ve Yahoo formatına çevir
+        # Yahoo formatı
         liste_sp500 = [x.replace('.', '-') for x in df['Symbol'].tolist()]
         
         print(f"   -> CSV'den {len(liste_sp500)} şirket okundu. Fiyatlar Yahoo'dan çekiliyor...")
         
-        # WBA gibi hataları susturmak için sessiz modda indiriyoruz
-        df_yahoo = yf.download(liste_sp500, period="5d", progress=False, threads=True, auto_adjust=True)['Close']
+        df_yahoo = yf.download(liste_sp500, period="5d", progress=False, threads=True, auto_adjust=True, ignore_tz=True)['Close']
         
         if not df_yahoo.empty:
             son_fiyatlar = df_yahoo.ffill().iloc[-1]
@@ -77,29 +120,6 @@ def get_sp500_dynamic():
         print(f"   -> ⚠️ ABD Hata: {e}")
         
     return data_abd
-
-# ==============================================================================
-# 2. BIST (MYNET API - DİNAMİK)
-# ==============================================================================
-def get_bist_mynet():
-    print("2. Borsa İstanbul (Mynet Dinamik) taranıyor...")
-    url = "https://finans.mynet.com/borsa/canliborsa/data/"
-    data_bist = {}
-    try:
-        r = requests.get(url, headers=headers_general, timeout=20)
-        if r.status_code == 200:
-            hisseler = r.json().get('data', {})
-            for sembol, detay in hisseler.items():
-                try:
-                    fiyat = detay.get('lastPrice') or detay.get('last_price')
-                    if fiyat and sembol.isalpha() and 3 <= len(sembol) <= 6:
-                        f_float = metni_sayiya_cevir(fiyat)
-                        if f_float > 0: data_bist[sembol] = f_float
-                except: continue
-            print(f"   -> ✅ Mynet Başarılı: {len(data_bist)} hisse.")
-    except Exception as e:
-        print(f"   -> ⚠️ Mynet Hata: {e}")
-    return data_bist
 
 # ==============================================================================
 # 3. KRİPTO (CMC API)
@@ -159,9 +179,8 @@ def get_tefas_data():
                     fonlar = {}
                     for f in d:
                         try:
-                            # Fiyatı al ve düzelt
-                            raw_fiyat = str(f['FIYAT']).replace(',', '.')
-                            fonlar[f['FONKODU']] = float(raw_fiyat)
+                            val = float(str(f['FIYAT']).replace(',', '.'))
+                            fonlar[f['FONKODU']] = val
                         except: continue
                     print(f"   -> ✅ TEFAS Başarılı ({tarih_str}): {len(fonlar)} fon.")
                     return fonlar
@@ -176,7 +195,7 @@ def get_doviz_yahoo():
     liste = ["USDTRY=X", "EURTRY=X", "GBPTRY=X", "CHFTRY=X", "CADTRY=X", "JPYTRY=X", "AUDTRY=X", "EURUSD=X", "GBPUSD=X", "JPY=X", "DX-Y.NYB"]
     data = {}
     try:
-        df = yf.download(liste, period="5d", progress=False, threads=True, auto_adjust=True)['Close']
+        df = yf.download(liste, period="5d", progress=False, threads=True, auto_adjust=True, ignore_tz=True)['Close']
         if not df.empty:
             son = df.ffill().iloc[-1]
             for kur in liste:
@@ -211,18 +230,18 @@ def get_altin_site():
 # ANA ÇALIŞMA ALANI
 # ==============================================================================
 try:
-    print("--- FİNAL FİNANS BOTU (LİSTESİZ & DİNAMİK) ---")
+    print("--- FİNAL FİNANS BOTU (İŞ YATIRIM + CMC + TEFAS) ---")
     
-    d_abd = get_sp500_dynamic()
-    d_bist = get_bist_mynet()
-    d_kripto = get_crypto_cmc(250)
-    d_fon = get_tefas_data()
-    d_doviz = get_doviz_yahoo()
-    d_altin = get_altin_site()
+    d_bist = get_bist_isyatirim()  # İş Yatırım
+    d_abd = get_sp500_dynamic()    # GitHub CSV -> Yahoo
+    d_kripto = get_crypto_cmc(250) # CMC API
+    d_fon = get_tefas_data()       # TEFAS API
+    d_doviz = get_doviz_yahoo()    # Yahoo
+    d_altin = get_altin_site()     # Scraping
 
     final_paket = {
-        "borsa_abd_usd": d_abd,
         "borsa_tr_tl": d_bist,
+        "borsa_abd_usd": d_abd,
         "kripto_usd": d_kripto,
         "fon_tl": d_fon,
         "doviz_tl": d_doviz,
