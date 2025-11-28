@@ -6,7 +6,6 @@ on:
     - cron: '20 7 * * *'
     
     # 2. SADECE HAFTA İÇİ (Pzt-Cuma) 11:00 ile 17:00 arası saat başı
-    # (TR saatiyle 11, 12, 13, 14, 15, 16, 17) -> UTC: 8, 9...14
     - cron: '0 8-14 * * 1-5'
     
     # 3. HER GÜN (Hafta içi + Hafta sonu) Akşam Kapanış 18:15 (TR) / 15:15 (UTC)
@@ -37,5 +36,8 @@ jobs:
         run: |
           echo "$FIREBASE_KEY" > serviceAccountKey.json
 
+      # --- BURASI YENİ: CMC API KEY'İ PYTHON'A VERİYORUZ ---
       - name: Botu Çalıştır
+        env:
+          CMC_API_KEY: ${{ secrets.CMC_API_KEY }}
         run: python tumveriyi_cek.py
