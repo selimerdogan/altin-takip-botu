@@ -2,7 +2,7 @@ import requests
 from bs4 import BeautifulSoup
 import firebase_admin
 from firebase_admin import credentials, firestore
-from datetime import datetime, timedelta
+from datetime import datetime
 import sys
 import os
 import yfinance as yf
@@ -14,7 +14,7 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 
 # --- AYARLAR ---
 headers_general = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
 }
 
 # --- KİMLİK KONTROLLERİ ---
@@ -35,7 +35,6 @@ except Exception as e:
 
 def metni_sayiya_cevir(metin):
     try:
-        # 1.250,50 -> 1250.50 formatına çevir
         temiz = str(metin).replace('TL', '').replace('USD', '').replace('$', '').replace('%', '').strip()
         if "," in temiz:
             temiz = temiz.replace('.', '').replace(',', '.')
@@ -44,10 +43,10 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. DÖVİZ (KUR.DOVIZ.COM - YENİ!)
+# 1. DÖVİZ (SADECE İLK 10 - DOVIZ.COM)
 # ==============================================================================
-def get_doviz_site():
-    print("1. Döviz Kurları (kur.doviz.com) taranıyor...")
+def get_doviz_top10():
+    print("1. Döviz Kurları (İlk 10) çekiliyor...")
     url = "https://kur.doviz.com/"
     data = {}
     
@@ -57,33 +56,33 @@ def get_doviz_site():
             soup = BeautifulSoup(r.content, "html.parser")
             
             # Tablodaki satırları bul
-            # Genellikle tablo yapısı: İsim | Kod | Alış | Satış
             satirlar = soup.find_all("tr")
             
+            # Sayaç: Sadece ilk 10 taneyi alacağız
+            count = 0
+            limit = 10 
+            
             for row in satirlar:
+                if count >= limit: break # 10'a ulaştıysak dur.
+                
                 cols = row.find_all("td")
-                # Satırda yeterli sütun var mı?
                 if len(cols) >= 4:
                     try:
-                        # Sütun yapıları siteden siteye değişebilir ama genelde:
-                        # 0: İsim (Img + Text)
-                        # 1: Kod (USD)
-                        # 2: Alış
-                        # 3: Satış
+                        # 1. Sütun: Kod (USD), 3. Sütun: Satış Fiyatı
+                        kod = cols[1].get_text(strip=True)
+                        satis_fiyati = cols[3].get_text(strip=True)
                         
-                        kod = cols[1].get_text(strip=True) # USD, EUR
-                        satis_fiyati = cols[3].get_text(strip=True) # Satış fiyatını alalım
-                        
-                        # Filtre: Sadece 3 harfli standart kodları al (Gereksizleri ele)
+                        # Sadece geçerli kodları al (3 harfli)
                         if len(kod) == 3 and kod.isalpha():
                             fiyat = metni_sayiya_cevir(satis_fiyati)
                             if fiyat > 0:
                                 data[kod] = fiyat
+                                count += 1
                     except: continue
             
-            print(f"   -> ✅ Döviz Başarılı: {len(data)} adet kur çekildi.")
+            print(f"   -> ✅ Döviz: İlk {len(data)} kur alındı.")
         else:
-            print(f"   -> ⚠️ Site Hatası: {r.status_code}")
+            print(f"   -> ⚠️ Döviz Hatası: {r.status_code}")
             
     except Exception as e:
         print(f"   -> ⚠️ Döviz Bağlantı Hatası: {e}")
@@ -114,82 +113,75 @@ def get_bist_tradingview():
                         data_bist[d[0]] = float(d[1])
                 except: continue
             print(f"   -> ✅ BIST Başarılı: {len(data_bist)} hisse.")
-    except: pass
+    except Exception as e:
+        print(f"   -> ⚠️ BIST Hata: {e}")
     return data_bist
 
 # ==============================================================================
-# 3. YATIRIM FONLARI (TEFAS - AKILLI MOD)
+# 3. YATIRIM FONLARI (TRADINGVIEW SCANNER)
 # ==============================================================================
-def get_tefas_data():
-    print("3. Yatırım Fonları (TEFAS) taranıyor...")
-    url_api = "https://www.tefas.gov.tr/api/DB/BindComparisonFundReturns"
-    session = requests.Session()
-    tefas_headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
-        "X-Requested-With": "XMLHttpRequest",
-        "Referer": "https://www.tefas.gov.tr/FonKarsilastirma.aspx",
-        "Origin": "https://www.tefas.gov.tr", "Content-Type": "application/json; charset=UTF-8"
+def get_fon_tradingview():
+    print("3. Yatırım Fonları (TV Scanner) taranıyor...")
+    url = "https://scanner.tradingview.com/turkey/scan"
+    payload = {
+        "filter": [{"left": "type", "operation": "equal", "right": "fund"}],
+        "options": {"lang": "tr"},
+        "symbols": {"query": {"types": []}, "tickers": []},
+        "columns": ["name", "close"],
+        "range": [0, 2000]
     }
-    
-    try: session.get("https://www.tefas.gov.tr/FonKarsilastirma.aspx", headers=tefas_headers, timeout=10)
-    except: pass
-
-    simdi = datetime.now()
-    for i in range(7):
-        tarih = (simdi - timedelta(days=i))
-        if tarih.year > datetime.now().year: tarih = tarih.replace(year=datetime.now().year)
-        tarih_str = tarih.strftime("%d.%m.%Y")
-        
-        try:
-            payload = {"calismatipi": "2", "fontip": "YAT", "bastarih": tarih_str, "bittarih": tarih_str}
-            r = session.post(url_api, json=payload, headers=tefas_headers, timeout=30)
-            if r.status_code == 200:
-                d = r.json().get('data', [])
-                if len(d) > 50:
-                    fonlar = {}
-                    for f in d:
-                        try:
-                            val = float(str(f['FIYAT']).replace(',', '.'))
-                            fonlar[f['FONKODU']] = val
-                        except: continue
-                    print(f"   -> ✅ TEFAS Başarılı ({tarih_str}): {len(fonlar)} fon.")
-                    return fonlar
-        except: continue
-    print("   -> ❌ TEFAS verisi bulunamadı.")
-    return {}
-
-# ==============================================================================
-# 4. ABD BORSASI (S&P 500 - CSV + YAHOO)
-# ==============================================================================
-def get_sp500_dynamic():
-    print("4. ABD Borsası (S&P 500) taranıyor...")
-    url_csv = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
-    data_abd = {}
+    data_fon = {}
     try:
-        s = requests.get(url_csv).content
-        df = pd.read_csv(io.StringIO(s.decode('utf-8')))
-        liste_sp500 = [x.replace('.', '-') for x in df['Symbol'].tolist()]
-        black_list = ['WBA', 'DISCA', 'DISCK']
-        liste_sp500 = [x for x in liste_sp500 if x not in black_list]
-
-        df_yahoo = yf.download(liste_sp500, period="5d", progress=False, threads=True, auto_adjust=True, ignore_tz=True)['Close']
-        if not df_yahoo.empty:
-            son = df_yahoo.ffill().iloc[-1]
-            for sembol in liste_sp500:
+        r = requests.post(url, json=payload, headers=headers_general, timeout=20)
+        if r.status_code == 200:
+            for h in r.json().get('data', []):
                 try:
-                    val = son.get(sembol)
-                    if pd.notna(val): data_abd[sembol] = round(float(val), 2)
+                    d = h.get('d', [])
+                    if len(d) > 1:
+                        data_fon[d[0]] = float(d[1])
                 except: continue
-        print(f"   -> ✅ S&P 500 Başarılı: {len(data_abd)} hisse.")
-    except: pass
-    return data_abd
+            print(f"   -> ✅ Fonlar Başarılı: {len(data_fon)} adet.")
+    except Exception as e:
+        print(f"   -> ⚠️ Fon Hata: {e}")
+    return data_fon
+
+# ==============================================================================
+# 4. ABD BORSASI (TRADINGVIEW SCANNER)
+# ==============================================================================
+def get_abd_tradingview():
+    print("4. ABD Borsası (TV Scanner) taranıyor...")
+    url = "https://scanner.tradingview.com/america/scan"
+    payload = {
+        "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr"]}],
+        "options": {"lang": "en"},
+        "symbols": {"query": {"types": []}, "tickers": []},
+        "columns": ["name", "close", "market_cap_basic"],
+        "sort": {"sortBy": "market_cap_basic", "sortOrder": "desc"},
+        "range": [0, 600]
+    }
+    data = {}
+    try:
+        r = requests.post(url, json=payload, headers=headers_general, timeout=20)
+        if r.status_code == 200:
+            for h in r.json().get('data', []):
+                try:
+                    d = h.get('d', [])
+                    if len(d) > 1:
+                        data[d[0]] = float(d[1])
+                except: continue
+            print(f"   -> ✅ ABD Başarılı: {len(data)} hisse.")
+    except Exception as e:
+        print(f"   -> ⚠️ ABD Hata: {e}")
+    return data
 
 # ==============================================================================
 # 5. KRİPTO (CMC API)
 # ==============================================================================
 def get_crypto_cmc(limit=250):
-    if not CMC_API_KEY: return {}
-    print(f"5. Kripto Piyasası (CMC) taranıyor...")
+    if not CMC_API_KEY:
+        print("   -> ⚠️ CMC Key Yok.")
+        return {}
+    print(f"5. Kripto Piyasası (Top {limit}) taranıyor...")
     url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest'
     params = {'start': '1', 'limit': str(limit), 'convert': 'USD'}
     headers = {'Accepts': 'application/json', 'X-CMC_PRO_API_KEY': CMC_API_KEY}
@@ -204,7 +196,7 @@ def get_crypto_cmc(limit=250):
     return data_kripto
 
 # ==============================================================================
-# 6. ALTIN (SİTEDEN)
+# 6. ALTIN (SİTE)
 # ==============================================================================
 def get_altin_site():
     print("6. Altın verileri çekiliyor...")
@@ -228,34 +220,13 @@ def get_altin_site():
 # KAYIT
 # ==============================================================================
 try:
-    print("--- MEGA FİNANS BOTU (DOVIZ.COM ENTEGRELİ) ---")
+    print("--- FİNANS BOTU (İLK 10 DÖVİZ MODU) ---")
     
     final_paket = {
-        "doviz_tl": get_doviz_site(),          # Yeni Kaynak!
+        "doviz_tl": get_doviz_top10(),          # Sadece İlk 10
         "borsa_tr_tl": get_bist_tradingview(),
-        "borsa_abd_usd": get_sp500_dynamic(),
+        "borsa_abd_usd": get_abd_tradingview(),
+        "fon_tl": get_fon_tradingview(),
         "kripto_usd": get_crypto_cmc(250),
-        "fon_tl": get_tefas_data(),
         "altin_tl": get_altin_site(),
-        "timestamp": firestore.SERVER_TIMESTAMP
-    }
-
-    if any(len(v) > 0 for k,v in final_paket.items() if isinstance(v, dict)):
-        simdi = datetime.now()
-        doc_id = simdi.strftime("%Y-%m-%d")
-        saat = simdi.strftime("%H:%M")
-        
-        day_ref = db.collection(u'market_history').document(doc_id)
-        day_ref.set({'date': doc_id}, merge=True)
-        hour_ref = day_ref.collection(u'snapshots').document(saat)
-        hour_ref.set(final_paket)
-        
-        total = sum(len(v) for k,v in final_paket.items() if isinstance(v, dict))
-        print(f"🎉 BAŞARILI: [{doc_id} - {saat}] Toplam {total} veri kaydedildi.")
-    else:
-        print("❌ HATA: Veri yok!")
-        sys.exit(1)
-
-except Exception as e:
-    print(f"KRİTİK HATA: {e}")
-    sys.exit(1)
+        "timestamp": firestore
