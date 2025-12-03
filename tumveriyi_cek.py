@@ -43,29 +43,19 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. DÖVİZ (EN POPÜLER 10 - YAHOO)
+# 1. DÖVİZ (YAHOO - EN POPÜLER 10)
 # ==============================================================================
 def get_doviz_top10():
-    print("1. Top 10 Döviz Kuru (TL) çekiliyor...")
+    print("1. Top 10 Döviz Kuru (Yahoo) çekiliyor...")
     
-    # Türkiye'de en çok işlem gören 10 para birimi
     liste = [
-        "USDTRY=X", # Dolar
-        "EURTRY=X", # Euro
-        "GBPTRY=X", # Sterlin
-        "CHFTRY=X", # İsviçre Frangı
-        "CADTRY=X", # Kanada Doları
-        "JPYTRY=X", # Japon Yeni
-        "AUDTRY=X", # Avustralya Doları
-        "SEKTRY=X", # İsveç Kronu
-        "DKKTRY=X", # Danimarka Kronu
-        "SARTRY=X", # Suudi Riyali (Yahoo bazen vermeyebilir, gelmezse sorun değil)
-        "NOKTRY=X"  # Norveç Kronu (Yedek)
+        "USDTRY=X", "EURTRY=X", "GBPTRY=X", "CHFTRY=X", "CADTRY=X", 
+        "JPYTRY=X", "AUDTRY=X", "SEKTRY=X", "DKKTRY=X", "NOKTRY=X"
     ]
     
     data = {}
     try:
-        # threads=False: Veritabanı kilidini önler
+        # threads=False veritabanı kilidini önler
         df = yf.download(liste, period="5d", progress=False, threads=False, auto_adjust=True, ignore_tz=True)['Close']
         
         if not df.empty:
@@ -76,10 +66,7 @@ def get_doviz_top10():
                     if pd.notna(val):
                         # İsim temizliği: USDTRY=X -> USD
                         key = kod.replace("TRY=X", "").replace("=X", "")
-                        
-                        # Sadece ilk 10 taneyi alalım (Liste sırasına göre)
-                        if len(data) < 10:
-                            data[key] = round(float(val), 4)
+                        data[key] = round(float(val), 4)
                 except: continue
                 
         print(f"   -> ✅ Döviz Bitti: {len(data)} adet.")
@@ -103,12 +90,13 @@ def get_altin_site():
                 if len(tds) > 2:
                     try:
                         isim = tds[0].get_text(strip=True)
-                        # Ons Altın genellikle Dolar'dır, ama listede olsun.
-                        # TL olanlar (Gram, Çeyrek vs.) öncelikli.
-                        fiyat = metni_sayiya_cevir(tds[2].get_text(strip=True))
-                        if fiyat > 0: data[isim] = fiyat
+                        if "Ons" not in isim:
+                            fiyat = metni_sayiya_cevir(tds[2].get_text(strip=True))
+                            if fiyat > 0: data[isim] = fiyat
                     except: continue
-    except: pass
+    except Exception as e:
+        print(f"   -> ⚠️ Altın Hata: {e}")
+        
     print(f"   -> ✅ Altın Bitti: {len(data)} adet.")
     return data
 
@@ -132,17 +120,45 @@ def get_bist_tradingview():
             for h in r.json().get('data', []):
                 try:
                     d = h.get('d', [])
-                    if len(d) > 1: data[d[0]] = float(d[1])
+                    if len(d) > 1:
+                        data[d[0]] = float(d[1])
                 except: continue
             print(f"   -> ✅ BIST Başarılı: {len(data)} hisse.")
     except: pass
     return data
 
 # ==============================================================================
-# 4. ABD BORSASI (TRADINGVIEW SCANNER)
+# 4. YATIRIM FONLARI (TRADINGVIEW SCANNER)
+# ==============================================================================
+def get_fon_tradingview():
+    print("4. Yatırım Fonları (TV Scanner) taranıyor...")
+    url = "https://scanner.tradingview.com/turkey/scan"
+    payload = {
+        "filter": [{"left": "type", "operation": "equal", "right": "fund"}],
+        "options": {"lang": "tr"},
+        "symbols": {"query": {"types": []}, "tickers": []},
+        "columns": ["name", "close"],
+        "range": [0, 2000]
+    }
+    data = {}
+    try:
+        r = requests.post(url, json=payload, headers=headers_general, timeout=20)
+        if r.status_code == 200:
+            for h in r.json().get('data', []):
+                try:
+                    d = h.get('d', [])
+                    if len(d) > 1:
+                        data[d[0]] = float(d[1])
+                except: continue
+            print(f"   -> ✅ Fonlar Başarılı: {len(data)} adet.")
+    except: pass
+    return data
+
+# ==============================================================================
+# 5. ABD BORSASI (TRADINGVIEW SCANNER)
 # ==============================================================================
 def get_abd_tradingview():
-    print("4. ABD Borsası (TV Scanner) taranıyor...")
+    print("5. ABD Borsası (TV Scanner) taranıyor...")
     url = "https://scanner.tradingview.com/america/scan"
     payload = {
         "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr"]}],
@@ -159,30 +175,22 @@ def get_abd_tradingview():
             for h in r.json().get('data', []):
                 try:
                     d = h.get('d', [])
-                    if len(d) > 1: data[d[0]] = float(d[1])
+                    
+                    # --- HATA DÜZELTİLDİ ---
+                    if len(d) > 1: 
+                        data[d[0]] = float(d[1])
+                        
                 except: continue
             print(f"   -> ✅ ABD Başarılı: {len(data)} hisse.")
     except: pass
     return data
 
 # ==============================================================================
-# 5. YATIRIM FONLARI (TRADINGVIEW SCANNER)
+# 6. KRİPTO (CMC API)
 # ==============================================================================
-def get_fon_tradingview():
-    print("5. Yatırım Fonları (TV Scanner) taranıyor...")
-    url = "https://scanner.tradingview.com/turkey/scan"
-    payload = {
-        "filter": [{"left": "type", "operation": "equal", "right": "fund"}],
-        "options": {"lang": "tr"},
-        "symbols": {"query": {"types": []}, "tickers": []},
-        "columns": ["name", "close"],
-        "range": [0, 2000]
-    }
-    data = {}
-    try:
-        r = requests.post(url, json=payload, headers=headers_general, timeout=20)
-        if r.status_code == 200:
-            for h in r.json().get('data', []):
-                try:
-                    d = h.get('d', [])
-                    if len(d) >
+def get_crypto_cmc(limit=250):
+    if not CMC_API_KEY:
+        print("   -> ⚠️ CMC Key Yok.")
+        return {}
+    print(f"6. Kripto Piyasası (CMC Top {limit}) taranıyor...")
+    url = 'https://pro-api
