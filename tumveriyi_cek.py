@@ -35,7 +35,6 @@ except Exception as e:
 
 def metni_sayiya_cevir(metin):
     try:
-        # "34,5020" -> 34.5020
         temiz = str(metin).replace('TL', '').replace('USD', '').replace('$', '').replace('%', '').strip()
         if "," in temiz:
             temiz = temiz.replace('.', '').replace(',', '.')
@@ -44,114 +43,69 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. DÖVİZ (DOVIZ.COM - İLK 10) - YENİ MODÜL!
+# 1. DÖVİZ (YAHOO FINANCE - GARANTİ OLAN)
 # ==============================================================================
-def get_doviz_site():
-    print("1. Döviz Kurları (doviz.com) taranıyor...")
-    url = "https://www.doviz.com/"
-    data = {}
+def get_doviz_yahoo():
+    print("1. Döviz Kurları (Yahoo) çekiliyor...")
     
-    try:
-        r = requests.get(url, headers=headers_general, timeout=20)
-        if r.status_code == 200:
-            soup = BeautifulSoup(r.content, "html.parser")
-            
-            # Doviz.com ana sayfasındaki "market-data" veya ana tabloyu buluyoruz.
-            # Genellikle <div class="market-data"> içindeki item'lardır.
-            # Veya basitçe 'item' class'ına sahip divleri gezebiliriz.
-            
-            # En garanti yöntem: data-socket-key özelliğine sahip satırları bulmak
-            # Örn: <div class="item" data-socket-key="USD" ...>
-            
-            items = soup.find_all("div", class_="item")
-            
-            count = 0
-            limit = 10 # İlk 10 tanesi yeterli
-            
-            for item in items:
-                if count >= limit: break
-                
-                try:
-                    # Kod (USD, EUR)
-                    kod_tag = item.find("span", class_="name")
-                    if not kod_tag: continue
-                    kod = kod_tag.get_text(strip=True)
-                    
-                    # Fiyat (Satış fiyatını alıyoruz)
-                    fiyat_tag = item.find("span", class_="value")
-                    if not fiyat_tag: continue
-                    fiyat_text = fiyat_tag.get_text(strip=True)
-                    
-                    # Veriyi temizle
-                    fiyat = metni_sayiya_cevir(fiyat_text)
-                    
-                    # Sadece 3 harfli standart kurları al (ALTIN vs. karışmasın)
-                    if len(kod) == 3 and kod.isalpha():
-                        data[kod] = fiyat
-                        count += 1
-                        
-                except: continue
-            
-            # Eğer yukarıdaki yöntem çalışmazsa (Site tasarımı değişirse) YEDEK PLAN:
-            if len(data) == 0:
-                 # Tablo yapısını dene
-                 rows = soup.find_all("tr")
-                 for row in rows:
-                     cols = row.find_all("td")
-                     if len(cols) >= 3:
-                         kod = cols[0].get_text(strip=True).split()[0] # "ABD Doları" -> "ABD" (Riskli)
-                         # Bu kısım riskli olduğu için Yahoo yedeğini aşağıda çağıracağız.
-                         pass
-
-            print(f"   -> ✅ Döviz Başarılı: {len(data)} adet kur (doviz.com).")
-            
-    except Exception as e:
-        print(f"   -> ⚠️ Döviz.com Hatası: {e}")
+    # Türkiye'de en çok takip edilen kurlar
+    liste = [
+        "USDTRY=X", # Dolar
+        "EURTRY=X", # Euro
+        "GBPTRY=X", # Sterlin
+        "CHFTRY=X", # İsviçre Frangı
+        "CADTRY=X", # Kanada Doları
+        "JPYTRY=X", # Japon Yeni
+        "AUDTRY=X", # Avustralya Doları
+        "SARTRY=X", # Suudi Riyali
+        "CNYTRY=X", # Çin Yuanı (Yahoo bazen vermeyebilir)
+        "EURUSD=X", # Parite
+        "GBPUSD=X", # Parite
+        "DX-Y.NYB"  # Dolar Endeksi
+    ]
     
-    # Eğer siteden çekemezsek boş dönmesin, Yahoo'dan tamamlasın
-    if len(data) < 3:
-        print("   -> ⚠️ Site verisi eksik, Yahoo devreye giriyor...")
-        return get_doviz_yahoo_yedek()
-        
-    return data
-
-# --- YEDEK DÖVİZ FONKSİYONU (YAHOO) ---
-def get_doviz_yahoo_yedek():
-    liste = ["USDTRY=X", "EURTRY=X", "GBPTRY=X", "CHFTRY=X", "CADTRY=X", "JPYTRY=X", "AUDTRY=X"]
     data = {}
     try:
-        df = yf.download(liste, period="1d", progress=False)['Close']
+        # Yahoo'dan toplu çek
+        df = yf.download(liste, period="5d", progress=False, threads=True, auto_adjust=True, ignore_tz=True)['Close']
         if not df.empty:
-            son = df.iloc[-1]
-            for k in liste:
-                val = son.get(k)
-                if pd.notna(val):
-                    clean = k.replace("TRY=X", "")
-                    data[clean] = round(float(val), 4)
-    except: pass
+            son = df.ffill().iloc[-1]
+            for kur in liste:
+                try:
+                    val = son.get(kur)
+                    if pd.notna(val): 
+                        # İsim temizliği (USDTRY=X -> USD)
+                        key = kur.replace("TRY=X", "").replace("=X", "").replace(".NYB", "")
+                        if key.endswith("TRY"): key = key.replace("TRY", "")
+                        
+                        data[key] = round(float(val), 4)
+                except: continue
+    except Exception as e:
+        print(f"   -> ⚠️ Yahoo Hata: {e}")
+        
+    print(f"   -> ✅ Döviz Bitti: {len(data)} adet.")
     return data
 
 # ==============================================================================
-# 2. ALTIN (DOVIZ.COM - KAZIMA)
+# 2. ALTIN (DOVIZ.COM - KAZIMA - BU ÇALIŞIYOR)
 # ==============================================================================
 def get_altin_site():
-    print("2. Altın verileri çekiliyor...")
+    print("2. Altın verileri (doviz.com) çekiliyor...")
     data = {}
     try:
         r = requests.get("https://altin.doviz.com/", headers=headers_general, timeout=20)
         if r.status_code == 200:
             soup = BeautifulSoup(r.content, "html.parser")
+            # Tablodaki verileri bul
             for tr in soup.find_all("tr"):
                 tds = tr.find_all("td")
                 if len(tds) > 2:
                     try:
                         isim = tds[0].get_text(strip=True)
-                        if "Ons" not in isim:
+                        if "Ons" not in isim: # Ons hariç (TL olanlar)
                             fiyat = metni_sayiya_cevir(tds[2].get_text(strip=True))
                             if fiyat > 0: data[isim] = fiyat
                     except: continue
-        else:
-            print(f"   -> ⚠️ Altın Sitesi Hata: {r.status_code}")
     except Exception as e:
         print(f"   -> ⚠️ Altın Hata: {e}")
         
@@ -265,15 +219,15 @@ def get_crypto_cmc(limit=250):
 # KAYIT (SNAPSHOT MİMARİSİ)
 # ==============================================================================
 try:
-    print("--- FİNANS BOTU (DOVIZ.COM + TV + CMC) ---")
+    print("--- FİNANS BOTU (FİNAL STABİL) ---")
     
     final_paket = {
-        "doviz_tl": get_doviz_site(),           # Yeni Kaynak!
-        "altin_tl": get_altin_site(),
-        "borsa_tr_tl": get_bist_tradingview(),
-        "borsa_abd_usd": get_abd_tradingview(),
-        "fon_tl": get_fon_tradingview(),
-        "kripto_usd": get_crypto_cmc(250),
+        "doviz_tl": get_doviz_yahoo(),          # Yahoo (Garanti)
+        "altin_tl": get_altin_site(),           # Doviz.com (Kazıma - Çalışıyor)
+        "borsa_tr_tl": get_bist_tradingview(),  # TV
+        "fon_tl": get_fon_tradingview(),        # TV
+        "borsa_abd_usd": get_abd_tradingview(), # TV
+        "kripto_usd": get_crypto_cmc(250),      # CMC
         "timestamp": firestore.SERVER_TIMESTAMP
     }
 
