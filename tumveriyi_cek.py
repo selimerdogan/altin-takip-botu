@@ -43,51 +43,51 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. DÖVİZ & EMTİA (YAHOO - SADELEŞTİRİLMİŞ)
+# 1. DÖVİZ (YAHOO - SADECE TL ÇİFTLERİ)
 # ==============================================================================
-def get_doviz_sade():
-    print("1. Sadeleştirilmiş Döviz ve Emtia (Yahoo) çekiliyor...")
+def get_doviz_sade_tl():
+    print("1. Döviz Kurları (Sadece TL Çiftleri) çekiliyor...")
     
+    # Buradan Ons, Gümüş, Platin gibi Dolar bazlıları ÇIKARDIK.
+    # Sadece parası TL olanlar kaldı.
     liste = [
-        "USDTRY=X", "EURTRY=X", "GBPTRY=X", "CHFTRY=X", "CADTRY=X", 
-        "JPYTRY=X", "AUDTRY=X", 
-        # Emtialar
-        "GC=F", "SI=F", "PL=F", "PA=F"
+        "USDTRY=X", # Dolar/TL
+        "EURTRY=X", # Euro/TL
+        "GBPTRY=X", # Sterlin/TL
+        "CHFTRY=X", # İsviçre Frangı/TL
+        "CADTRY=X", # Kanada Doları/TL
+        "JPYTRY=X", # Japon Yeni/TL
+        "AUDTRY=X"  # Avustralya Doları/TL
     ]
     
-    data_doviz = {}
-    data_emtia = {}
+    data = {}
     
     try:
+        # threads=False: Veritabanı kilidini önler
         df = yf.download(liste, period="5d", progress=False, threads=False, auto_adjust=True, ignore_tz=True)['Close']
+        
         if not df.empty:
             son = df.ffill().iloc[-1]
             for kod in liste:
                 try:
                     val = son.get(kod)
                     if pd.notna(val):
-                        fiyat = round(float(val), 4)
-                        
-                        if kod == "GC=F": data_emtia["Ons Altın"] = fiyat
-                        elif kod == "SI=F": data_emtia["Gümüş (Ons)"] = fiyat
-                        elif kod == "PL=F": data_emtia["Platin"] = fiyat
-                        elif kod == "PA=F": data_emtia["Paladyum"] = fiyat
-                        else:
-                            key = kod.replace("TRY=X", "").replace("=X", "")
-                            if key.endswith("TRY"): key = key.replace("TRY", "")
-                            data_doviz[key] = fiyat
+                        # İsim temizliği: USDTRY=X -> USD
+                        key = kod.replace("TRY=X", "").replace("=X", "")
+                        data[key] = round(float(val), 4)
                 except: continue
+                
+        print(f"   -> ✅ Döviz Bitti: {len(data)} adet.")
     except Exception as e:
         print(f"   -> ⚠️ Yahoo Hata: {e}")
         
-    print(f"   -> ✅ Yahoo Bitti: {len(data_doviz)} Döviz, {len(data_emtia)} Emtia.")
-    return data_doviz, data_emtia
+    return data
 
 # ==============================================================================
-# 2. ALTIN (DOVIZ.COM - KAZIMA)
+# 2. ALTIN (DOVIZ.COM - SADECE TL OLANLAR)
 # ==============================================================================
-def get_altin_site():
-    print("2. Altın Fiyatları (Doviz.com) çekiliyor...")
+def get_altin_site_tl():
+    print("2. Altın Fiyatları (Sadece TL) çekiliyor...")
     data = {}
     try:
         r = requests.get("https://altin.doviz.com/", headers=headers_general, timeout=20)
@@ -98,11 +98,15 @@ def get_altin_site():
                 if len(tds) > 2:
                     try:
                         isim = tds[0].get_text(strip=True)
+                        
+                        # FİLTRE: "Ons" kelimesi geçenleri alma (Çünkü onlar Dolar)
                         if "Ons" not in isim:
                             fiyat = metni_sayiya_cevir(tds[2].get_text(strip=True))
                             if fiyat > 0: data[isim] = fiyat
                     except: continue
-    except: pass
+    except Exception as e:
+        print(f"   -> ⚠️ Altın Hata: {e}")
+        
     print(f"   -> ✅ Altın Bitti: {len(data)} adet.")
     return data
 
@@ -126,7 +130,8 @@ def get_bist_tradingview():
             for h in r.json().get('data', []):
                 try:
                     d = h.get('d', [])
-                    if len(d) > 1: data[d[0]] = float(d[1])
+                    if len(d) > 1:
+                        data[d[0]] = float(d[1])
                 except: continue
             print(f"   -> ✅ BIST Başarılı: {len(data)} hisse.")
     except: pass
@@ -152,7 +157,8 @@ def get_fon_tradingview():
             for h in r.json().get('data', []):
                 try:
                     d = h.get('d', [])
-                    if len(d) > 1: data[d[0]] = float(d[1])
+                    if len(d) > 1:
+                        data[d[0]] = float(d[1])
                 except: continue
             print(f"   -> ✅ Fonlar Başarılı: {len(data)} adet.")
     except: pass
@@ -179,7 +185,8 @@ def get_abd_tradingview():
             for h in r.json().get('data', []):
                 try:
                     d = h.get('d', [])
-                    if len(d) > 1: data[d[0]] = float(d[1])
+                    if len(d) > 1:
+                        data[d[0]] = float(d[1])
                 except: continue
             print(f"   -> ✅ ABD Başarılı: {len(data)} hisse.")
     except: pass
@@ -210,15 +217,11 @@ def get_crypto_cmc(limit=250):
 # KAYIT (SNAPSHOT MİMARİSİ)
 # ==============================================================================
 try:
-    print("--- FİNANS BOTU (FİNAL) ---")
+    print("--- FİNANS BOTU (SADECE TL ALTIN & DÖVİZ) ---")
     
-    d_doviz, d_emtia = get_doviz_sade()
-    d_altin_tl = get_altin_site()
-    tum_altin = {**d_altin_tl, **d_emtia}
-
     final_paket = {
-        "doviz_tl": d_doviz,
-        "altin_tl": tum_altin,
+        "doviz_tl": get_doviz_sade_tl(),        # Sadece TL Dövizler
+        "altin_tl": get_altin_site_tl(),        # Sadece TL Altınlar
         "borsa_tr_tl": get_bist_tradingview(),
         "borsa_abd_usd": get_abd_tradingview(),
         "fon_tl": get_fon_tradingview(),
