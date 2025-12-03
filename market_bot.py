@@ -4,27 +4,38 @@ from firebase_admin import credentials, firestore
 from datetime import datetime
 import sys
 import os
+import json  # <--- JSON Kütüphanesi Eklendi
 import yfinance as yf
 import pandas as pd
 import warnings
 from bs4 import BeautifulSoup
 
+# Gereksiz uyarıları kapat
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 # --- AYARLAR ---
 headers_general = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
 }
 
-if not os.path.exists("serviceAccountKey.json"):
-    print("HATA: serviceAccountKey.json bulunamadı!")
-    sys.exit(1)
-
+# --- KİMLİK KONTROLLERİ (GÜNCELLENDİ) ---
+firebase_key_str = os.environ.get('FIREBASE_KEY')
 CMC_API_KEY = os.environ.get('CMC_API_KEY')
+
+# Önce GitHub Ortam Değişkenine bak, yoksa Dosyaya bak
+if firebase_key_str:
+    # GitHub üzerindeyiz, string'i JSON'a çevirip kullanıyoruz
+    cred_dict = json.loads(firebase_key_str)
+    cred = credentials.Certificate(cred_dict)
+elif os.path.exists("serviceAccountKey.json"):
+    # Bilgisayarımızdayız, dosyadan okuyoruz
+    cred = credentials.Certificate("serviceAccountKey.json")
+else:
+    print("HATA: Ne 'FIREBASE_KEY' ortam değişkeni ne de 'serviceAccountKey.json' dosyası bulundu!")
+    sys.exit(1)
 
 try:
     if not firebase_admin._apps:
-        cred = credentials.Certificate("serviceAccountKey.json")
         firebase_admin.initialize_app(cred)
     db = firestore.client()
 except Exception as e:
@@ -33,113 +44,128 @@ except Exception as e:
 
 def metni_sayiya_cevir(metin):
     try:
-        temiz = str(metin).replace('TL', '').replace('USD', '').replace('%', '').strip()
-        if "," in temiz: temiz = temiz.replace('.', '').replace(',', '.')
+        temiz = str(metin).replace('TL', '').replace('USD', '').replace('$', '').replace('%', '').strip()
+        if "," in temiz:
+            temiz = temiz.replace('.', '').replace(',', '.')
         return float(temiz)
-    except: return 0.0
+    except:
+        return 0.0
 
 # ==============================================================================
-# 1. DÖVİZ (YAHOO - FİYAT + DEĞİŞİM HESABI)
+# 1. DÖVİZ (YAHOO - EN POPÜLER 10)
 # ==============================================================================
-def get_doviz_yahoo():
-    print("1. Döviz Kurları ve Değişimleri çekiliyor...")
-    # Sadece TL Dövizler (Parite Yok)
-    liste = ["USDTRY=X", "EURTRY=X", "GBPTRY=X", "CHFTRY=X", "CADTRY=X", "JPYTRY=X", "AUDTRY=X"]
+def get_doviz_top10():
+    print("1. Top 10 Döviz Kuru (Yahoo) çekiliyor...")
+    
+    liste = [
+        "USDTRY=X", "EURTRY=X", "GBPTRY=X", "CHFTRY=X", "CADTRY=X", 
+        "JPYTRY=X", "AUDTRY=X", "SEKTRY=X", "DKKTRY=X", "NOKTRY=X"
+    ]
+    
     data = {}
     try:
-        # Son 2 günün verisini al ki değişim hesaplayalım
-        df = yf.download(liste, period="5d", progress=False, auto_adjust=True)['Close']
-        
+        df = yf.download(liste, period="5d", progress=False, threads=False, auto_adjust=True, ignore_tz=True)['Close']
         if not df.empty:
-            df = df.ffill() # Boşlukları doldur
-            son_fiyatlar = df.iloc[-1]
-            
-            # Bir önceki kapanışı bul (Değişim hesabı için)
-            # Eğer 5 günlük veri varsa, sondan bir önceki
-            onceki_fiyatlar = df.iloc[-2] if len(df) > 1 else df.iloc[-1]
-
+            son = df.ffill().iloc[-1]
             for kod in liste:
                 try:
-                    fiyat = float(son_fiyatlar.get(kod))
-                    eski_fiyat = float(onceki_fiyatlar.get(kod))
-                    
-                    if fiyat > 0:
-                        # Yüzde Değişim Hesabı: ((Yeni - Eski) / Eski) * 100
-                        degisim = ((fiyat - eski_fiyat) / eski_fiyat) * 100
-                        
+                    val = son.get(kod)
+                    if pd.notna(val):
                         key = kod.replace("TRY=X", "").replace("=X", "")
-                        
-                        # YENİ YAPI: { "fiyat": 34.5, "degisim": 0.12 }
-                        data[key] = {"fiyat": round(fiyat, 4), "degisim": round(degisim, 2)}
+                        data[key] = round(float(val), 4)
                 except: continue
-    except Exception as e: print(f"   -> ⚠️ Yahoo Hata: {e}")
-    
-    print(f"   -> ✅ Döviz Bitti: {len(data)} adet.")
+        print(f"   -> ✅ Döviz Bitti: {len(data)} adet.")
+    except Exception as e:
+        print(f"   -> ⚠️ Döviz Hata: {e}")
     return data
 
 # ==============================================================================
-# 2. ALTIN (DOVIZ.COM - FİYAT + DEĞİŞİM)
+# 2. ALTIN (DOVIZ.COM - KAZIMA)
 # ==============================================================================
 def get_altin_site():
-    print("2. Altın Fiyatları ve Değişimleri çekiliyor...")
+    print("2. Altın Fiyatları (Doviz.com) çekiliyor...")
     data = {}
     try:
         r = requests.get("https://altin.doviz.com/", headers=headers_general, timeout=20)
         if r.status_code == 200:
             soup = BeautifulSoup(r.content, "html.parser")
-            # Tabloyu bul
-            table = soup.find("table")
-            if table:
-                for tr in table.find_all("tr"):
-                    tds = tr.find_all("td")
-                    if len(tds) > 3:
-                        try:
-                            isim = tds[0].get_text(strip=True)
-                            if "Ons" not in isim:
-                                fiyat = metni_sayiya_cevir(tds[2].get_text(strip=True)) # Satış
-                                degisim_txt = tds[3].get_text(strip=True) # % Değişim Sütunu
-                                degisim = metni_sayiya_cevir(degisim_txt)
-                                
-                                if fiyat > 0:
-                                    data[isim] = {"fiyat": fiyat, "degisim": degisim}
-                        except: continue
-    except: pass
+            for tr in soup.find_all("tr"):
+                tds = tr.find_all("td")
+                if len(tds) > 2:
+                    try:
+                        isim = tds[0].get_text(strip=True)
+                        if "Ons" not in isim:
+                            fiyat = metni_sayiya_cevir(tds[2].get_text(strip=True))
+                            if fiyat > 0: data[isim] = fiyat
+                    except: continue
+    except Exception as e:
+        print(f"   -> ⚠️ Altın Hata: {e}")
     print(f"   -> ✅ Altın Bitti: {len(data)} adet.")
     return data
 
 # ==============================================================================
-# 3. BIST & ABD & FON (TRADINGVIEW - HAZIR DEĞİŞİM VERİSİ)
+# 3. BIST (TRADINGVIEW SCANNER)
 # ==============================================================================
-def get_tradingview_data(market, filter_type, range_limit):
-    url = f"https://scanner.tradingview.com/{market}/scan"
+def get_bist_tradingview():
+    print("3. Borsa İstanbul (TV Scanner) taranıyor...")
+    url = "https://scanner.tradingview.com/turkey/scan"
     payload = {
-        "filter": [{"left": "type", "operation": filter_type[0], "right": filter_type[1]}],
+        "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr"]}],
         "options": {"lang": "tr"},
         "symbols": {"query": {"types": []}, "tickers": []},
-        "columns": ["name", "close", "change"], # change = % Değişim
-        "range": [0, range_limit]
+        "columns": ["name", "close"],
+        "range": [0, 1000]
     }
     data = {}
     try:
         r = requests.post(url, json=payload, headers=headers_general, timeout=20)
         if r.status_code == 200:
             for h in r.json().get('data', []):
-                d = h.get('d', []) # [isim, fiyat, değişim]
-                if len(d) > 2:
-                    isim = d[0]
-                    fiyat = float(d[1])
-                    degisim = float(d[2]) # TV direkt % değişim verir
-                    
-                    data[isim] = {"fiyat": fiyat, "degisim": round(degisim, 2)}
+                try:
+                    d = h.get('d', [])
+                    if len(d) > 1:
+                        data[d[0]] = float(d[1])
+                except: continue
+            print(f"   -> ✅ BIST Başarılı: {len(data)} hisse.")
     except: pass
     return data
 
 # ==============================================================================
-# 4. KRİPTO (CMC API - HAZIR DEĞİŞİM)
+# 4. ABD BORSASI (TRADINGVIEW SCANNER)
+# ==============================================================================
+def get_abd_tradingview():
+    print("4. ABD Borsası (TV Scanner) taranıyor...")
+    url = "https://scanner.tradingview.com/america/scan"
+    payload = {
+        "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr"]}],
+        "options": {"lang": "en"},
+        "symbols": {"query": {"types": []}, "tickers": []},
+        "columns": ["name", "close", "market_cap_basic"],
+        "sort": {"sortBy": "market_cap_basic", "sortOrder": "desc"},
+        "range": [0, 600]
+    }
+    data = {}
+    try:
+        r = requests.post(url, json=payload, headers=headers_general, timeout=20)
+        if r.status_code == 200:
+            for h in r.json().get('data', []):
+                try:
+                    d = h.get('d', [])
+                    if len(d) > 1:
+                        data[d[0]] = float(d[1])
+                except: continue
+            print(f"   -> ✅ ABD Başarılı: {len(data)} hisse.")
+    except: pass
+    return data
+
+# ==============================================================================
+# 5. KRİPTO (CMC API)
 # ==============================================================================
 def get_crypto_cmc(limit=250):
-    if not CMC_API_KEY: return {}
-    print(f"6. Kripto Piyasası taranıyor...")
+    if not CMC_API_KEY:
+        print("   -> ⚠️ CMC Key Yok.")
+        return {}
+    print(f"5. Kripto Piyasası (CMC Top {limit}) taranıyor...")
     url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest'
     params = {'start': '1', 'limit': str(limit), 'convert': 'USD'}
     headers = {'Accepts': 'application/json', 'X-CMC_PRO_API_KEY': CMC_API_KEY}
@@ -148,40 +174,23 @@ def get_crypto_cmc(limit=250):
         r = requests.get(url, headers=headers, params=params, timeout=20)
         if r.status_code == 200:
             for coin in r.json()['data']:
-                quote = coin['quote']['USD']
-                fiyat = quote['price']
-                degisim = quote['percent_change_24h'] # 24s Değişim
-                
-                data[f"{coin['symbol']}-USD"] = {
-                    "fiyat": round(float(fiyat), 4),
-                    "degisim": round(float(degisim), 2)
-                }
+                data[f"{coin['symbol']}-USD"] = round(float(coin['quote']['USD']['price']), 4)
             print(f"   -> ✅ CMC Başarılı: {len(data)} coin.")
     except: pass
     return data
 
 # ==============================================================================
-# KAYIT
+# KAYIT (SNAPSHOT MİMARİSİ)
 # ==============================================================================
 try:
-    print("--- FİNANS BOTU (FİYAT + DEĞİŞİM %) ---")
+    print("--- PİYASA BOTU (HAFTA İÇİ) ---")
     
-    # TradingView Çağrıları
-    bist_data = get_tradingview_data("turkey", ["in_range", ["stock", "dr"]], 1000)
-    print(f"   -> ✅ BIST: {len(bist_data)} hisse.")
-    
-    abd_data = get_tradingview_data("america", ["in_range", ["stock", "dr"]], 600)
-    print(f"   -> ✅ ABD: {len(abd_data)} hisse.")
-    
-    fon_data = get_tradingview_data("turkey", ["equal", "fund"], 2000)
-    print(f"   -> ✅ Fon: {len(fon_data)} adet.")
-
+    # Fonlar bu botta YOK (Ayrı botta)
     final_paket = {
-        "doviz_tl": get_doviz_yahoo(),
+        "doviz_tl": get_doviz_top10(),
         "altin_tl": get_altin_site(),
-        "borsa_tr_tl": bist_data,
-        "borsa_abd_usd": abd_data,
-        "fon_tl": fon_data,
+        "borsa_tr_tl": get_bist_tradingview(),
+        "borsa_abd_usd": get_abd_tradingview(),
         "kripto_usd": get_crypto_cmc(250),
         "timestamp": firestore.SERVER_TIMESTAMP
     }
@@ -193,10 +202,12 @@ try:
         
         day_ref = db.collection(u'market_history').document(doc_id)
         day_ref.set({'date': doc_id}, merge=True)
-        hour_ref = day_ref.collection(u'snapshots').document(saat)
-        hour_ref.set(final_paket)
         
-        print(f"🎉 BAŞARILI: [{doc_id} - {saat}] Veriler ve Değişim Oranları Kaydedildi.")
+        # Merge=True önemli, Fon verisini silmemesi için
+        day_ref.collection(u'snapshots').document(saat).set(final_paket, merge=True)
+        
+        total = sum(len(v) for k,v in final_paket.items() if isinstance(v, dict))
+        print(f"🎉 BAŞARILI: [{doc_id} - {saat}] Toplam {total} piyasa verisi kaydedildi.")
     else:
         print("❌ HATA: Veri yok!")
         sys.exit(1)
