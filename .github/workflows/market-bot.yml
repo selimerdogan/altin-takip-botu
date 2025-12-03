@@ -1,31 +1,29 @@
-name: Piyasa Botu (Hafta İci)
+name: Fonları Firebase'e Yükle
 
 on:
   schedule:
-    # UTC Saatleri (TR = UTC + 3)
-    # 07:20 UTC = 10:20 TR (Açılış)
-    - cron: '20 7 * * 1-5'
-    # 08:00 - 15:00 UTC = 11:00 - 18:00 TR (Saat Başı)
-    - cron: '0 8-15 * * 1-5'
-    # 15:15 UTC = 18:15 TR (Kapanış)
-    - cron: '15 15 * * 1-5'
-  
-  workflow_dispatch:
+    # 0 8 = UTC Saatiyle 08:00 (Türkiye Saati ile 11:00)
+    # 1-5 = Pazartesi'den Cuma'ya kadar (Hafta içi)
+    - cron: '0 8 * * 1-5'
+  workflow_dispatch: # Manuel tetikleme her zaman açık kalsın
 
 jobs:
-  build:
+  scrape_and_upload:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Kodları Çek
-        uses: actions/checkout@v3
-      - name: Python Kur
+      - name: Repoyu Çek
+        uses: actions/checkout@v4
+
+      - name: Python Kurulumu
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.11' 
+
       - name: Kütüphaneleri Yükle
-        run: pip install firebase-admin requests pandas yfinance beautifulsoup4
-      - name: Botu Çalıştır
+        run: pip install -r requirements.txt
+
+      - name: Scripti Çalıştır
         env:
-          FIREBASE_KEY: ${{ secrets.FIREBASE_KEY }}
-          CMC_API_KEY: ${{ secrets.CMC_API_KEY }}
-        run: python market_bot.py
+          FIREBASE_CREDENTIALS: ${{ secrets.FIREBASE_CREDENTIALS }}
+        run: python main.py
