@@ -4,6 +4,7 @@ from firebase_admin import credentials, firestore
 from datetime import datetime
 import sys
 import os
+import json  # <--- EKLENDİ
 import yfinance as yf
 import pandas as pd
 import warnings
@@ -17,16 +18,23 @@ headers_general = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
 }
 
-# --- KİMLİK KONTROLLERİ ---
-if not os.path.exists("serviceAccountKey.json"):
-    print("HATA: serviceAccountKey.json bulunamadı!")
-    sys.exit(1)
-
+# --- KİMLİK KONTROLLERİ (GÜNCELLENDİ) ---
+# Önce GitHub ortam değişkenine bak, yoksa dosyaya bak.
+firebase_key_str = os.environ.get('FIREBASE_KEY')
 CMC_API_KEY = os.environ.get('CMC_API_KEY')
+
+if firebase_key_str:
+    # GitHub üzerindeyiz, string'i JSON'a çevir
+    cred = credentials.Certificate(json.loads(firebase_key_str))
+elif os.path.exists("serviceAccountKey.json"):
+    # Bilgisayarımızdayız, dosyadan oku
+    cred = credentials.Certificate("serviceAccountKey.json")
+else:
+    print("HATA: Ne 'FIREBASE_KEY' ortam değişkeni ne de 'serviceAccountKey.json' dosyası bulundu!")
+    sys.exit(1)
 
 try:
     if not firebase_admin._apps:
-        cred = credentials.Certificate("serviceAccountKey.json")
         firebase_admin.initialize_app(cred)
     db = firestore.client()
 except Exception as e:
@@ -180,7 +188,7 @@ def get_crypto_cmc(limit=250):
 # KAYIT (SNAPSHOT MİMARİSİ)
 # ==============================================================================
 try:
-    print("--- PİYASA BOTU (FON HARİÇ) ---")
+    print("--- PİYASA BOTU (ENV KEY MODU) ---")
     
     final_paket = {
         "doviz_tl": get_doviz_top10(),
@@ -191,8 +199,6 @@ try:
         "timestamp": firestore.SERVER_TIMESTAMP
     }
 
-    # Veri varsa kaydet
-    # Not: Fonlar 'tefas_bot.py' ile ayrı çekilecek
     if any(len(v) > 0 for k,v in final_paket.items() if isinstance(v, dict)):
         simdi = datetime.now()
         doc_id = simdi.strftime("%Y-%m-%d")
