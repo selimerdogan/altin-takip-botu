@@ -43,46 +43,48 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. DÖVİZ (YAHOO - SADECE TL PARALAR)
+# 1. DÖVİZ & EMTİA (YAHOO - SADELEŞTİRİLMİŞ)
 # ==============================================================================
 def get_doviz_sade():
-    print("1. Sadece TL Döviz Kurları (Yahoo) çekiliyor...")
+    print("1. Sadeleştirilmiş Döviz ve Emtia (Yahoo) çekiliyor...")
     
-    # Ons, Gümüş, Pariteler ÇIKARILDI. Sadece TL Dövizler.
     liste = [
-        "USDTRY=X", # Dolar
-        "EURTRY=X", # Euro
-        "GBPTRY=X", # Sterlin
-        "CHFTRY=X", # İsviçre Frangı
-        "CADTRY=X", # Kanada Doları
-        "JPYTRY=X", # Japon Yeni
-        "AUDTRY=X"  # Avustralya Doları
+        "USDTRY=X", "EURTRY=X", "GBPTRY=X", "CHFTRY=X", "CADTRY=X", 
+        "JPYTRY=X", "AUDTRY=X", 
+        # Emtialar
+        "GC=F", "SI=F", "PL=F", "PA=F"
     ]
     
-    data = {}
+    data_doviz = {}
+    data_emtia = {}
+    
     try:
-        # threads=False veritabanı kilidini önler
         df = yf.download(liste, period="5d", progress=False, threads=False, auto_adjust=True, ignore_tz=True)['Close']
-        
         if not df.empty:
             son = df.ffill().iloc[-1]
             for kod in liste:
                 try:
                     val = son.get(kod)
                     if pd.notna(val):
-                        # İsim temizliği: USDTRY=X -> USD
-                        key = kod.replace("TRY=X", "").replace("=X", "")
-                        data[key] = round(float(val), 4)
+                        fiyat = round(float(val), 4)
+                        
+                        if kod == "GC=F": data_emtia["Ons Altın"] = fiyat
+                        elif kod == "SI=F": data_emtia["Gümüş (Ons)"] = fiyat
+                        elif kod == "PL=F": data_emtia["Platin"] = fiyat
+                        elif kod == "PA=F": data_emtia["Paladyum"] = fiyat
+                        else:
+                            key = kod.replace("TRY=X", "").replace("=X", "")
+                            if key.endswith("TRY"): key = key.replace("TRY", "")
+                            data_doviz[key] = fiyat
                 except: continue
-                
-        print(f"   -> ✅ Döviz Bitti: {len(data)} adet.")
     except Exception as e:
-        print(f"   -> ⚠️ Döviz Hata: {e}")
+        print(f"   -> ⚠️ Yahoo Hata: {e}")
         
-    return data
+    print(f"   -> ✅ Yahoo Bitti: {len(data_doviz)} Döviz, {len(data_emtia)} Emtia.")
+    return data_doviz, data_emtia
 
 # ==============================================================================
-# 2. ALTIN (DOVIZ.COM - KAZIMA - SADECE TL)
+# 2. ALTIN (DOVIZ.COM - KAZIMA)
 # ==============================================================================
 def get_altin_site():
     print("2. Altın Fiyatları (Doviz.com) çekiliyor...")
@@ -96,14 +98,11 @@ def get_altin_site():
                 if len(tds) > 2:
                     try:
                         isim = tds[0].get_text(strip=True)
-                        # Ons hariç (TL olanlar: Gram, Çeyrek, Tam vs.)
                         if "Ons" not in isim:
                             fiyat = metni_sayiya_cevir(tds[2].get_text(strip=True))
                             if fiyat > 0: data[isim] = fiyat
                     except: continue
-    except Exception as e:
-        print(f"   -> ⚠️ Altın Hata: {e}")
-        
+    except: pass
     print(f"   -> ✅ Altın Bitti: {len(data)} adet.")
     return data
 
@@ -127,8 +126,7 @@ def get_bist_tradingview():
             for h in r.json().get('data', []):
                 try:
                     d = h.get('d', [])
-                    if len(d) > 1:
-                        data[d[0]] = float(d[1])
+                    if len(d) > 1: data[d[0]] = float(d[1])
                 except: continue
             print(f"   -> ✅ BIST Başarılı: {len(data)} hisse.")
     except: pass
@@ -154,8 +152,7 @@ def get_fon_tradingview():
             for h in r.json().get('data', []):
                 try:
                     d = h.get('d', [])
-                    if len(d) > 1:
-                        data[d[0]] = float(d[1])
+                    if len(d) > 1: data[d[0]] = float(d[1])
                 except: continue
             print(f"   -> ✅ Fonlar Başarılı: {len(data)} adet.")
     except: pass
@@ -182,8 +179,7 @@ def get_abd_tradingview():
             for h in r.json().get('data', []):
                 try:
                     d = h.get('d', [])
-                    if len(d) > 1:
-                        data[d[0]] = float(d[1])
+                    if len(d) > 1: data[d[0]] = float(d[1])
                 except: continue
             print(f"   -> ✅ ABD Başarılı: {len(data)} hisse.")
     except: pass
@@ -214,9 +210,39 @@ def get_crypto_cmc(limit=250):
 # KAYIT (SNAPSHOT MİMARİSİ)
 # ==============================================================================
 try:
-    print("--- FİNANS BOTU (SADE & NET) ---")
+    print("--- FİNANS BOTU (FİNAL) ---")
     
+    d_doviz, d_emtia = get_doviz_sade()
+    d_altin_tl = get_altin_site()
+    tum_altin = {**d_altin_tl, **d_emtia}
+
     final_paket = {
-        "doviz_tl": get_doviz_sade(),           # Sadece 7 Ana Kur
-        "altin_tl": get_altin_site(),           # Sadece TL Altınlar
-        "borsa_tr_tl": get_bist_tradingview
+        "doviz_tl": d_doviz,
+        "altin_tl": tum_altin,
+        "borsa_tr_tl": get_bist_tradingview(),
+        "borsa_abd_usd": get_abd_tradingview(),
+        "fon_tl": get_fon_tradingview(),
+        "kripto_usd": get_crypto_cmc(250),
+        "timestamp": firestore.SERVER_TIMESTAMP
+    }
+
+    if any(len(v) > 0 for k,v in final_paket.items() if isinstance(v, dict)):
+        simdi = datetime.now()
+        doc_id = simdi.strftime("%Y-%m-%d")
+        saat = simdi.strftime("%H:%M")
+        
+        day_ref = db.collection(u'market_history').document(doc_id)
+        day_ref.set({'date': doc_id}, merge=True)
+        
+        hour_ref = day_ref.collection(u'snapshots').document(saat)
+        hour_ref.set(final_paket)
+        
+        total = sum(len(v) for k,v in final_paket.items() if isinstance(v, dict))
+        print(f"🎉 BAŞARILI: [{doc_id} - {saat}] Toplam {total} veri kaydedildi.")
+    else:
+        print("❌ HATA: Veri yok!")
+        sys.exit(1)
+
+except Exception as e:
+    print(f"KRİTİK HATA: {e}")
+    sys.exit(1)
