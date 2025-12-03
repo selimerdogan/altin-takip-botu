@@ -35,7 +35,7 @@ except Exception as e:
 
 def metni_sayiya_cevir(metin):
     try:
-        # "2.950,50 TL" -> 2950.50
+        # "34,5020" -> 34.5020
         temiz = str(metin).replace('TL', '').replace('USD', '').replace('$', '').replace('%', '').strip()
         if "," in temiz:
             temiz = temiz.replace('.', '').replace(',', '.')
@@ -44,11 +44,11 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. ALTIN (DOVIZ.COM - KAZIMA - EN GÜNCEL PİYASA)
+# 1. DÖVİZ (DOVIZ.COM - İLK 10) - YENİ MODÜL!
 # ==============================================================================
-def get_altin_doviz_com():
-    print("1. Altın Fiyatları (altin.doviz.com) taranıyor...")
-    url = "https://altin.doviz.com/"
+def get_doviz_site():
+    print("1. Döviz Kurları (doviz.com) taranıyor...")
+    url = "https://www.doviz.com/"
     data = {}
     
     try:
@@ -56,61 +56,106 @@ def get_altin_doviz_com():
         if r.status_code == 200:
             soup = BeautifulSoup(r.content, "html.parser")
             
-            # Sitedeki ana tabloyu buluyoruz
-            # Genellikle 'table' tag'i içindedir.
-            # Yapı: İsim | Alış | Satış | Değişim...
-            tablo = soup.find("table")
-            if tablo:
-                satirlar = tablo.find_all("tr")
-                for row in satirlar:
-                    cols = row.find_all("td")
-                    if len(cols) > 2:
-                        try:
-                            # 1. Sütun: Altın İsmi (Gram Altın)
-                            isim = cols[0].get_text(strip=True)
-                            
-                            # 3. Sütun: Satış Fiyatı
-                            satis_fiyati = cols[2].get_text(strip=True)
-                            
-                            # Ons Altın genellikle Dolar olduğu için onu ayrıca belirtebiliriz
-                            # veya TL'ye çevirmek istersen burada işlem yapabilirsin.
-                            # Şimdilik olduğu gibi alıyoruz (Kuyumcu fiyatları).
-                            
-                            fiyat = metni_sayiya_cevir(satis_fiyati)
-                            
-                            if fiyat > 0:
-                                data[isim] = fiyat
-                        except: continue
+            # Doviz.com ana sayfasındaki "market-data" veya ana tabloyu buluyoruz.
+            # Genellikle <div class="market-data"> içindeki item'lardır.
+            # Veya basitçe 'item' class'ına sahip divleri gezebiliriz.
             
-            print(f"   -> ✅ Altın Başarılı: {len(data)} çeşit altın çekildi.")
-        else:
-            print(f"   -> ⚠️ Site Hatası: {r.status_code}")
+            # En garanti yöntem: data-socket-key özelliğine sahip satırları bulmak
+            # Örn: <div class="item" data-socket-key="USD" ...>
+            
+            items = soup.find_all("div", class_="item")
+            
+            count = 0
+            limit = 10 # İlk 10 tanesi yeterli
+            
+            for item in items:
+                if count >= limit: break
+                
+                try:
+                    # Kod (USD, EUR)
+                    kod_tag = item.find("span", class_="name")
+                    if not kod_tag: continue
+                    kod = kod_tag.get_text(strip=True)
+                    
+                    # Fiyat (Satış fiyatını alıyoruz)
+                    fiyat_tag = item.find("span", class_="value")
+                    if not fiyat_tag: continue
+                    fiyat_text = fiyat_tag.get_text(strip=True)
+                    
+                    # Veriyi temizle
+                    fiyat = metni_sayiya_cevir(fiyat_text)
+                    
+                    # Sadece 3 harfli standart kurları al (ALTIN vs. karışmasın)
+                    if len(kod) == 3 and kod.isalpha():
+                        data[kod] = fiyat
+                        count += 1
+                        
+                except: continue
+            
+            # Eğer yukarıdaki yöntem çalışmazsa (Site tasarımı değişirse) YEDEK PLAN:
+            if len(data) == 0:
+                 # Tablo yapısını dene
+                 rows = soup.find_all("tr")
+                 for row in rows:
+                     cols = row.find_all("td")
+                     if len(cols) >= 3:
+                         kod = cols[0].get_text(strip=True).split()[0] # "ABD Doları" -> "ABD" (Riskli)
+                         # Bu kısım riskli olduğu için Yahoo yedeğini aşağıda çağıracağız.
+                         pass
+
+            print(f"   -> ✅ Döviz Başarılı: {len(data)} adet kur (doviz.com).")
             
     except Exception as e:
-        print(f"   -> ⚠️ Altın Bağlantı Hatası: {e}")
+        print(f"   -> ⚠️ Döviz.com Hatası: {e}")
+    
+    # Eğer siteden çekemezsek boş dönmesin, Yahoo'dan tamamlasın
+    if len(data) < 3:
+        print("   -> ⚠️ Site verisi eksik, Yahoo devreye giriyor...")
+        return get_doviz_yahoo_yedek()
         
     return data
 
-# ==============================================================================
-# 2. DÖVİZ (YAHOO FINANCE)
-# ==============================================================================
-def get_doviz_yahoo():
-    print("2. Döviz Kurları (Yahoo) çekiliyor...")
-    liste = ["USDTRY=X", "EURTRY=X", "GBPTRY=X", "CHFTRY=X", "CADTRY=X", "JPYTRY=X", "AUDTRY=X", "EURUSD=X", "GBPUSD=X", "JPY=X", "DX-Y.NYB"]
+# --- YEDEK DÖVİZ FONKSİYONU (YAHOO) ---
+def get_doviz_yahoo_yedek():
+    liste = ["USDTRY=X", "EURTRY=X", "GBPTRY=X", "CHFTRY=X", "CADTRY=X", "JPYTRY=X", "AUDTRY=X"]
     data = {}
     try:
-        df = yf.download(liste, period="5d", progress=False, threads=True, auto_adjust=True, ignore_tz=True)['Close']
+        df = yf.download(liste, period="1d", progress=False)['Close']
         if not df.empty:
-            son = df.ffill().iloc[-1]
-            for kur in liste:
-                try:
-                    val = son.get(kur)
-                    if pd.notna(val):
-                        key = kur.replace("TRY=X", "").replace("=X", "").replace(".NYB", "")
-                        data[key] = round(float(val), 4)
-                except: continue
+            son = df.iloc[-1]
+            for k in liste:
+                val = son.get(k)
+                if pd.notna(val):
+                    clean = k.replace("TRY=X", "")
+                    data[clean] = round(float(val), 4)
     except: pass
-    print(f"   -> ✅ Döviz Bitti: {len(data)} adet.")
+    return data
+
+# ==============================================================================
+# 2. ALTIN (DOVIZ.COM - KAZIMA)
+# ==============================================================================
+def get_altin_site():
+    print("2. Altın verileri çekiliyor...")
+    data = {}
+    try:
+        r = requests.get("https://altin.doviz.com/", headers=headers_general, timeout=20)
+        if r.status_code == 200:
+            soup = BeautifulSoup(r.content, "html.parser")
+            for tr in soup.find_all("tr"):
+                tds = tr.find_all("td")
+                if len(tds) > 2:
+                    try:
+                        isim = tds[0].get_text(strip=True)
+                        if "Ons" not in isim:
+                            fiyat = metni_sayiya_cevir(tds[2].get_text(strip=True))
+                            if fiyat > 0: data[isim] = fiyat
+                    except: continue
+        else:
+            print(f"   -> ⚠️ Altın Sitesi Hata: {r.status_code}")
+    except Exception as e:
+        print(f"   -> ⚠️ Altın Hata: {e}")
+        
+    print(f"   -> ✅ Altın Bitti: {len(data)} adet.")
     return data
 
 # ==============================================================================
@@ -141,10 +186,37 @@ def get_bist_tradingview():
     return data
 
 # ==============================================================================
-# 4. ABD BORSASI (TRADINGVIEW SCANNER)
+# 4. YATIRIM FONLARI (TRADINGVIEW SCANNER)
+# ==============================================================================
+def get_fon_tradingview():
+    print("4. Yatırım Fonları (TV Scanner) taranıyor...")
+    url = "https://scanner.tradingview.com/turkey/scan"
+    payload = {
+        "filter": [{"left": "type", "operation": "equal", "right": "fund"}],
+        "options": {"lang": "tr"},
+        "symbols": {"query": {"types": []}, "tickers": []},
+        "columns": ["name", "close"],
+        "range": [0, 2000]
+    }
+    data = {}
+    try:
+        r = requests.post(url, json=payload, headers=headers_general, timeout=20)
+        if r.status_code == 200:
+            for h in r.json().get('data', []):
+                try:
+                    d = h.get('d', [])
+                    if len(d) > 1:
+                        data[d[0]] = float(d[1])
+                except: continue
+            print(f"   -> ✅ Fonlar Başarılı: {len(data)} adet.")
+    except: pass
+    return data
+
+# ==============================================================================
+# 5. ABD BORSASI (TRADINGVIEW SCANNER)
 # ==============================================================================
 def get_abd_tradingview():
-    print("4. ABD Borsası (TV Scanner) taranıyor...")
+    print("5. ABD Borsası (TV Scanner) taranıyor...")
     url = "https://scanner.tradingview.com/america/scan"
     payload = {
         "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr"]}],
@@ -165,33 +237,6 @@ def get_abd_tradingview():
                         data[d[0]] = float(d[1])
                 except: continue
             print(f"   -> ✅ ABD Başarılı: {len(data)} hisse.")
-    except: pass
-    return data
-
-# ==============================================================================
-# 5. YATIRIM FONLARI (TRADINGVIEW SCANNER)
-# ==============================================================================
-def get_fon_tradingview():
-    print("5. Yatırım Fonları (TV Scanner) taranıyor...")
-    url = "https://scanner.tradingview.com/turkey/scan"
-    payload = {
-        "filter": [{"left": "type", "operation": "equal", "right": "fund"}],
-        "options": {"lang": "tr"},
-        "symbols": {"query": {"types": []}, "tickers": []},
-        "columns": ["name", "close"],
-        "range": [0, 2000]
-    }
-    data = {}
-    try:
-        r = requests.post(url, json=payload, headers=headers_general, timeout=20)
-        if r.status_code == 200:
-            for h in r.json().get('data', []):
-                try:
-                    d = h.get('d', [])
-                    if len(d) > 1:
-                        data[d[0]] = float(d[1])
-                except: continue
-            print(f"   -> ✅ Fonlar Başarılı: {len(data)} adet.")
     except: pass
     return data
 
@@ -220,15 +265,15 @@ def get_crypto_cmc(limit=250):
 # KAYIT (SNAPSHOT MİMARİSİ)
 # ==============================================================================
 try:
-    print("--- FİNANS BOTU (DOVIZ.COM ALTIN + TV + YAHOO + CMC) ---")
+    print("--- FİNANS BOTU (DOVIZ.COM + TV + CMC) ---")
     
     final_paket = {
-        "altin_tl": get_altin_doviz_com(),     # YENİ: Doviz.com'dan
-        "doviz_tl": get_doviz_yahoo(),         # Yahoo'dan
-        "borsa_tr_tl": get_bist_tradingview(), # TV
-        "borsa_abd_usd": get_abd_tradingview(),# TV
-        "fon_tl": get_fon_tradingview(),       # TV
-        "kripto_usd": get_crypto_cmc(250),     # CMC
+        "doviz_tl": get_doviz_site(),           # Yeni Kaynak!
+        "altin_tl": get_altin_site(),
+        "borsa_tr_tl": get_bist_tradingview(),
+        "borsa_abd_usd": get_abd_tradingview(),
+        "fon_tl": get_fon_tradingview(),
+        "kripto_usd": get_crypto_cmc(250),
         "timestamp": firestore.SERVER_TIMESTAMP
     }
 
