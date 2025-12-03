@@ -1,13 +1,14 @@
 import requests
 import firebase_admin
 from firebase_admin import credentials, firestore
-from datetime import datetime
+from datetime import datetime, timedelta
 import sys
 import os
 import yfinance as yf
 import pandas as pd
 import warnings
 from bs4 import BeautifulSoup
+from tefas import get_data # YENİ KÜTÜPHANE
 
 # Gereksiz uyarıları kapat
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -46,45 +47,25 @@ def metni_sayiya_cevir(metin):
 # 1. DÖVİZ (YAHOO - SADECE TL ÇİFTLERİ)
 # ==============================================================================
 def get_doviz_sade_tl():
-    print("1. Döviz Kurları (Sadece TL Çiftleri) çekiliyor...")
-    
-    # Buradan Ons, Gümüş, Platin gibi Dolar bazlıları ÇIKARDIK.
-    # Sadece parası TL olanlar kaldı.
-    liste = [
-        "USDTRY=X", # Dolar/TL
-        "EURTRY=X", # Euro/TL
-        "GBPTRY=X", # Sterlin/TL
-        "CHFTRY=X", # İsviçre Frangı/TL
-        "CADTRY=X", # Kanada Doları/TL
-        "JPYTRY=X", # Japon Yeni/TL
-        "AUDTRY=X"  # Avustralya Doları/TL
-    ]
-    
+    print("1. Döviz Kurları (Sadece TL) çekiliyor...")
+    liste = ["USDTRY=X", "EURTRY=X", "GBPTRY=X", "CHFTRY=X", "CADTRY=X", "JPYTRY=X", "AUDTRY=X"]
     data = {}
-    
     try:
-        # threads=False: Veritabanı kilidini önler
         df = yf.download(liste, period="5d", progress=False, threads=False, auto_adjust=True, ignore_tz=True)['Close']
-        
         if not df.empty:
             son = df.ffill().iloc[-1]
             for kod in liste:
                 try:
                     val = son.get(kod)
                     if pd.notna(val):
-                        # İsim temizliği: USDTRY=X -> USD
                         key = kod.replace("TRY=X", "").replace("=X", "")
                         data[key] = round(float(val), 4)
                 except: continue
-                
-        print(f"   -> ✅ Döviz Bitti: {len(data)} adet.")
-    except Exception as e:
-        print(f"   -> ⚠️ Yahoo Hata: {e}")
-        
+    except: pass
     return data
 
 # ==============================================================================
-# 2. ALTIN (DOVIZ.COM - SADECE TL OLANLAR)
+# 2. ALTIN (DOVIZ.COM - SADECE TL)
 # ==============================================================================
 def get_altin_site_tl():
     print("2. Altın Fiyatları (Sadece TL) çekiliyor...")
@@ -98,16 +79,11 @@ def get_altin_site_tl():
                 if len(tds) > 2:
                     try:
                         isim = tds[0].get_text(strip=True)
-                        
-                        # FİLTRE: "Ons" kelimesi geçenleri alma (Çünkü onlar Dolar)
                         if "Ons" not in isim:
                             fiyat = metni_sayiya_cevir(tds[2].get_text(strip=True))
                             if fiyat > 0: data[isim] = fiyat
                     except: continue
-    except Exception as e:
-        print(f"   -> ⚠️ Altın Hata: {e}")
-        
-    print(f"   -> ✅ Altın Bitti: {len(data)} adet.")
+    except: pass
     return data
 
 # ==============================================================================
@@ -130,38 +106,40 @@ def get_bist_tradingview():
             for h in r.json().get('data', []):
                 try:
                     d = h.get('d', [])
-                    if len(d) > 1:
-                        data[d[0]] = float(d[1])
+                    if len(d) > 1: data[d[0]] = float(d[1])
                 except: continue
-            print(f"   -> ✅ BIST Başarılı: {len(data)} hisse.")
     except: pass
     return data
 
 # ==============================================================================
-# 4. YATIRIM FONLARI (TRADINGVIEW SCANNER)
+# 4. YATIRIM FONLARI (TEFAS KÜTÜPHANESİ - YENİ!)
 # ==============================================================================
-def get_fon_tradingview():
-    print("4. Yatırım Fonları (TV Scanner) taranıyor...")
-    url = "https://scanner.tradingview.com/turkey/scan"
-    payload = {
-        "filter": [{"left": "type", "operation": "equal", "right": "fund"}],
-        "options": {"lang": "tr"},
-        "symbols": {"query": {"types": []}, "tickers": []},
-        "columns": ["name", "close"],
-        "range": [0, 2000]
-    }
+def get_tefas_funds():
+    print("4. Yatırım Fonları (TEFAS Kütüphanesi) çekiliyor...")
+    
+    # Çekmek istediğin popüler fonların listesi (İstediğin kadar ekle)
+    FON_LISTESI = ["AFT", "MAC", "TCD", "YAY", "NNF", "IPJ", "TI2", "AES", "GMR", "TI3", "IHK", "IDH"]
+    
     data = {}
     try:
-        r = requests.post(url, json=payload, headers=headers_general, timeout=20)
-        if r.status_code == 200:
-            for h in r.json().get('data', []):
+        # tefas kütüphanesi veriyi DataFrame olarak döndürür
+        df = get_data(FON_LISTESI)
+        
+        if df is not None and not df.empty:
+            # Her fon için son tarihli veriyi al
+            for fon_kodu in FON_LISTESI:
                 try:
-                    d = h.get('d', [])
-                    if len(d) > 1:
-                        data[d[0]] = float(d[1])
+                    # O fona ait satırları filtrele
+                    fon_satiri = df[df['code'] == fon_kodu].tail(1)
+                    if not fon_satiri.empty:
+                        fiyat = float(fon_satiri['price'].values[0])
+                        data[fon_kodu] = fiyat
                 except: continue
-            print(f"   -> ✅ Fonlar Başarılı: {len(data)} adet.")
-    except: pass
+                
+        print(f"   -> ✅ TEFAS Bitti: {len(data)} adet fon.")
+    except Exception as e:
+        print(f"   -> ⚠️ TEFAS Hatası: {e}")
+        
     return data
 
 # ==============================================================================
@@ -185,10 +163,8 @@ def get_abd_tradingview():
             for h in r.json().get('data', []):
                 try:
                     d = h.get('d', [])
-                    if len(d) > 1:
-                        data[d[0]] = float(d[1])
+                    if len(d) > 1: data[d[0]] = float(d[1])
                 except: continue
-            print(f"   -> ✅ ABD Başarılı: {len(data)} hisse.")
     except: pass
     return data
 
@@ -209,7 +185,6 @@ def get_crypto_cmc(limit=250):
         if r.status_code == 200:
             for coin in r.json()['data']:
                 data[f"{coin['symbol']}-USD"] = round(float(coin['quote']['USD']['price']), 4)
-            print(f"   -> ✅ CMC Başarılı: {len(data)} coin.")
     except: pass
     return data
 
@@ -217,15 +192,15 @@ def get_crypto_cmc(limit=250):
 # KAYIT (SNAPSHOT MİMARİSİ)
 # ==============================================================================
 try:
-    print("--- FİNANS BOTU (SADECE TL ALTIN & DÖVİZ) ---")
+    print("--- FİNANS BOTU (TEFAS DAHİL) ---")
     
     final_paket = {
-        "doviz_tl": get_doviz_sade_tl(),        # Sadece TL Dövizler
-        "altin_tl": get_altin_site_tl(),        # Sadece TL Altınlar
+        "doviz_tl": get_doviz_sade_tl(),
+        "altin_tl": get_altin_site_tl(),
         "borsa_tr_tl": get_bist_tradingview(),
         "borsa_abd_usd": get_abd_tradingview(),
-        "fon_tl": get_fon_tradingview(),
         "kripto_usd": get_crypto_cmc(250),
+        "fon_tl": get_tefas_funds(), # YENİ FONKSİYON
         "timestamp": firestore.SERVER_TIMESTAMP
     }
 
