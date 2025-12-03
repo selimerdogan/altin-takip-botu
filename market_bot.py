@@ -39,3 +39,88 @@ def metni_sayiya_cevir(metin):
         if "," in temiz:
             temiz = temiz.replace('.', '').replace(',', '.')
         return float(temiz)
+    except:
+        return 0.0
+
+# ==============================================================================
+# 1. DÖVİZ (YAHOO - EN POPÜLER 10)
+# ==============================================================================
+def get_doviz_top10():
+    print("1. Top 10 Döviz Kuru (Yahoo) çekiliyor...")
+    
+    liste = [
+        "USDTRY=X", "EURTRY=X", "GBPTRY=X", "CHFTRY=X", "CADTRY=X", 
+        "JPYTRY=X", "AUDTRY=X", "SEKTRY=X", "DKKTRY=X", "NOKTRY=X"
+    ]
+    
+    data = {}
+    try:
+        # threads=False veritabanı kilidini önler
+        df = yf.download(liste, period="5d", progress=False, threads=False, auto_adjust=True, ignore_tz=True)['Close']
+        
+        if not df.empty:
+            son = df.ffill().iloc[-1]
+            for kod in liste:
+                try:
+                    val = son.get(kod)
+                    if pd.notna(val):
+                        # İsim temizliği: USDTRY=X -> USD
+                        key = kod.replace("TRY=X", "").replace("=X", "")
+                        data[key] = round(float(val), 4)
+                except: continue
+                
+        print(f"   -> ✅ Döviz Bitti: {len(data)} adet.")
+    except Exception as e:
+        print(f"   -> ⚠️ Döviz Hata: {e}")
+        
+    return data
+
+# ==============================================================================
+# 2. ALTIN (DOVIZ.COM - KAZIMA)
+# ==============================================================================
+def get_altin_site():
+    print("2. Altın Fiyatları (Doviz.com) çekiliyor...")
+    data = {}
+    try:
+        r = requests.get("https://altin.doviz.com/", headers=headers_general, timeout=20)
+        if r.status_code == 200:
+            soup = BeautifulSoup(r.content, "html.parser")
+            for tr in soup.find_all("tr"):
+                tds = tr.find_all("td")
+                if len(tds) > 2:
+                    try:
+                        isim = tds[0].get_text(strip=True)
+                        if "Ons" not in isim:
+                            fiyat = metni_sayiya_cevir(tds[2].get_text(strip=True))
+                            if fiyat > 0: data[isim] = fiyat
+                    except: continue
+    except Exception as e:
+        print(f"   -> ⚠️ Altın Hata: {e}")
+        
+    print(f"   -> ✅ Altın Bitti: {len(data)} adet.")
+    return data
+
+# ==============================================================================
+# 3. BIST (TRADINGVIEW SCANNER)
+# ==============================================================================
+def get_bist_tradingview():
+    print("3. Borsa İstanbul (TV Scanner) taranıyor...")
+    url = "https://scanner.tradingview.com/turkey/scan"
+    payload = {
+        "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr"]}],
+        "options": {"lang": "tr"},
+        "symbols": {"query": {"types": []}, "tickers": []},
+        "columns": ["name", "close"],
+        "range": [0, 1000]
+    }
+    data = {}
+    try:
+        r = requests.post(url, json=payload, headers=headers_general, timeout=20)
+        if r.status_code == 200:
+            for h in r.json().get('data', []):
+                try:
+                    d = h.get('d', [])
+                    if len(d) > 1:
+                        data[d[0]] = float(d[1])
+                except: continue
+            print(f"   -> ✅ B
