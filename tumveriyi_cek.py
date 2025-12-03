@@ -43,12 +43,12 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. DÖVİZ & ONS & GÜMÜŞ (YAHOO - EN POPÜLER 10)
+# 1. DÖVİZ (EN POPÜLER 10 - YAHOO)
 # ==============================================================================
-def get_doviz_yahoo():
-    print("1. En Popüler Dövizler (Yahoo) çekiliyor...")
+def get_doviz_top10():
+    print("1. Top 10 Döviz Kuru (TL) çekiliyor...")
     
-    # Sadece en çok kullanılanlar (Demirbaş Listesi)
+    # Türkiye'de en çok işlem gören 10 para birimi
     liste = [
         "USDTRY=X", # Dolar
         "EURTRY=X", # Euro
@@ -57,23 +57,16 @@ def get_doviz_yahoo():
         "CADTRY=X", # Kanada Doları
         "JPYTRY=X", # Japon Yeni
         "AUDTRY=X", # Avustralya Doları
-        "SARTRY=X", # Suudi Riyali
-        "EURUSD=X", # Parite
-        "GBPUSD=X", # Parite
-        "DX-Y.NYB", # Dolar Endeksi
-        
-        # Global Emtialar
-        "GC=F",     # Ons Altın ($)
-        "SI=F",     # Gümüş ($)
-        "PL=F"      # Platin ($)
+        "SEKTRY=X", # İsveç Kronu
+        "DKKTRY=X", # Danimarka Kronu
+        "SARTRY=X", # Suudi Riyali (Yahoo bazen vermeyebilir, gelmezse sorun değil)
+        "NOKTRY=X"  # Norveç Kronu (Yedek)
     ]
     
-    data_doviz = {}
-    data_emtia = {}
-    
+    data = {}
     try:
-        # Güvenli indirme (Hata vermez)
-        df = yf.download(liste, period="5d", progress=False, threads=True, auto_adjust=True, ignore_tz=True)['Close']
+        # threads=False: Veritabanı kilidini önler
+        df = yf.download(liste, period="5d", progress=False, threads=False, auto_adjust=True, ignore_tz=True)['Close']
         
         if not df.empty:
             son = df.ffill().iloc[-1]
@@ -81,35 +74,27 @@ def get_doviz_yahoo():
                 try:
                     val = son.get(kod)
                     if pd.notna(val):
-                        fiyat = round(float(val), 4)
+                        # İsim temizliği: USDTRY=X -> USD
+                        key = kod.replace("TRY=X", "").replace("=X", "")
                         
-                        # Emtiaları Ayır (Dolar bazlılar)
-                        if kod == "GC=F": data_emtia["Ons Altın"] = fiyat
-                        elif kod == "SI=F": data_emtia["Gümüş (Ons)"] = fiyat
-                        elif kod == "PL=F": data_emtia["Platin"] = fiyat
-                        else:
-                            # Dövizleri Temizle (USDTRY=X -> USD)
-                            key = kod.replace("TRY=X", "").replace("=X", "").replace(".NYB", "")
-                            if key.endswith("TRY"): key = key.replace("TRY", "")
-                            
-                            data_doviz[key] = fiyat
+                        # Sadece ilk 10 taneyi alalım (Liste sırasına göre)
+                        if len(data) < 10:
+                            data[key] = round(float(val), 4)
                 except: continue
                 
-        print(f"   -> ✅ Döviz: {len(data_doviz)} adet, Emtia: {len(data_emtia)} adet alındı.")
-            
+        print(f"   -> ✅ Döviz Bitti: {len(data)} adet.")
     except Exception as e:
-        print(f"   -> ⚠️ Yahoo Hata: {e}")
+        print(f"   -> ⚠️ Döviz Hata: {e}")
         
-    return data_doviz, data_emtia
+    return data
 
 # ==============================================================================
-# 2. ALTIN (TL CİNSİNDEN - DOVIZ.COM)
+# 2. ALTIN (DOVIZ.COM - KAZIMA)
 # ==============================================================================
 def get_altin_site():
-    print("2. Gram/Çeyrek Altın (TL) çekiliyor...")
+    print("2. Altın Fiyatları (Doviz.com) çekiliyor...")
     data = {}
     try:
-        # Doviz.com Altın sayfası çok stabildir
         r = requests.get("https://altin.doviz.com/", headers=headers_general, timeout=20)
         if r.status_code == 200:
             soup = BeautifulSoup(r.content, "html.parser")
@@ -118,14 +103,12 @@ def get_altin_site():
                 if len(tds) > 2:
                     try:
                         isim = tds[0].get_text(strip=True)
-                        # Ons'u Yahoo'dan aldık, buradan sadece TL olanları alalım
-                        if "Ons" not in isim:
-                            fiyat = metni_sayiya_cevir(tds[2].get_text(strip=True))
-                            if fiyat > 0: data[isim] = fiyat
+                        # Ons Altın genellikle Dolar'dır, ama listede olsun.
+                        # TL olanlar (Gram, Çeyrek vs.) öncelikli.
+                        fiyat = metni_sayiya_cevir(tds[2].get_text(strip=True))
+                        if fiyat > 0: data[isim] = fiyat
                     except: continue
-    except Exception as e:
-        print(f"   -> ⚠️ Altın Hata: {e}")
-        
+    except: pass
     print(f"   -> ✅ Altın Bitti: {len(data)} adet.")
     return data
 
@@ -156,36 +139,10 @@ def get_bist_tradingview():
     return data
 
 # ==============================================================================
-# 4. YATIRIM FONLARI (TRADINGVIEW SCANNER)
-# ==============================================================================
-def get_fon_tradingview():
-    print("4. Yatırım Fonları (TV Scanner) taranıyor...")
-    url = "https://scanner.tradingview.com/turkey/scan"
-    payload = {
-        "filter": [{"left": "type", "operation": "equal", "right": "fund"}],
-        "options": {"lang": "tr"},
-        "symbols": {"query": {"types": []}, "tickers": []},
-        "columns": ["name", "close"],
-        "range": [0, 2000]
-    }
-    data = {}
-    try:
-        r = requests.post(url, json=payload, headers=headers_general, timeout=20)
-        if r.status_code == 200:
-            for h in r.json().get('data', []):
-                try:
-                    d = h.get('d', [])
-                    if len(d) > 1: data[d[0]] = float(d[1])
-                except: continue
-            print(f"   -> ✅ Fonlar Başarılı: {len(data)} adet.")
-    except: pass
-    return data
-
-# ==============================================================================
-# 5. ABD BORSASI (TRADINGVIEW SCANNER)
+# 4. ABD BORSASI (TRADINGVIEW SCANNER)
 # ==============================================================================
 def get_abd_tradingview():
-    print("5. ABD Borsası (TV Scanner) taranıyor...")
+    print("4. ABD Borsası (TV Scanner) taranıyor...")
     url = "https://scanner.tradingview.com/america/scan"
     payload = {
         "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr"]}],
@@ -209,68 +166,23 @@ def get_abd_tradingview():
     return data
 
 # ==============================================================================
-# 6. KRİPTO (CMC API)
+# 5. YATIRIM FONLARI (TRADINGVIEW SCANNER)
 # ==============================================================================
-def get_crypto_cmc(limit=250):
-    if not CMC_API_KEY:
-        print("   -> ⚠️ CMC Key Yok.")
-        return {}
-    print(f"6. Kripto Piyasası (CMC Top {limit}) taranıyor...")
-    url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest'
-    params = {'start': '1', 'limit': str(limit), 'convert': 'USD'}
-    headers = {'Accepts': 'application/json', 'X-CMC_PRO_API_KEY': CMC_API_KEY}
+def get_fon_tradingview():
+    print("5. Yatırım Fonları (TV Scanner) taranıyor...")
+    url = "https://scanner.tradingview.com/turkey/scan"
+    payload = {
+        "filter": [{"left": "type", "operation": "equal", "right": "fund"}],
+        "options": {"lang": "tr"},
+        "symbols": {"query": {"types": []}, "tickers": []},
+        "columns": ["name", "close"],
+        "range": [0, 2000]
+    }
     data = {}
     try:
-        r = requests.get(url, headers=headers, params=params, timeout=20)
+        r = requests.post(url, json=payload, headers=headers_general, timeout=20)
         if r.status_code == 200:
-            for coin in r.json()['data']:
-                data[f"{coin['symbol']}-USD"] = round(float(coin['quote']['USD']['price']), 4)
-            print(f"   -> ✅ CMC Başarılı: {len(data)} coin.")
-    except: pass
-    return data
-
-# ==============================================================================
-# KAYIT (SNAPSHOT MİMARİSİ)
-# ==============================================================================
-try:
-    print("--- FİNANS BOTU (SADELEŞTİRİLMİŞ & GÜÇLÜ) ---")
-    
-    # 1. Yahoo'dan Döviz ve Global Emtia
-    d_doviz, d_emtia = get_doviz_yahoo()
-    
-    # 2. Siteden Altın (TL)
-    d_altin_tl = get_altin_site()
-    
-    # Birleştir: Altın/Emtia tek çatı altında
-    tum_altin = {**d_altin_tl, **d_emtia}
-
-    final_paket = {
-        "doviz_tl": d_doviz,
-        "altin_tl": tum_altin,
-        "borsa_tr_tl": get_bist_tradingview(),
-        "borsa_abd_usd": get_abd_tradingview(),
-        "fon_tl": get_fon_tradingview(),
-        "kripto_usd": get_crypto_cmc(250),
-        "timestamp": firestore.SERVER_TIMESTAMP
-    }
-
-    if any(len(v) > 0 for k,v in final_paket.items() if isinstance(v, dict)):
-        simdi = datetime.now()
-        doc_id = simdi.strftime("%Y-%m-%d")
-        saat = simdi.strftime("%H:%M")
-        
-        day_ref = db.collection(u'market_history').document(doc_id)
-        day_ref.set({'date': doc_id}, merge=True)
-        
-        hour_ref = day_ref.collection(u'snapshots').document(saat)
-        hour_ref.set(final_paket)
-        
-        total = sum(len(v) for k,v in final_paket.items() if isinstance(v, dict))
-        print(f"🎉 BAŞARILI: [{doc_id} - {saat}] Toplam {total} veri kaydedildi.")
-    else:
-        print("❌ HATA: Veri yok!")
-        sys.exit(1)
-
-except Exception as e:
-    print(f"KRİTİK HATA: {e}")
-    sys.exit(1)
+            for h in r.json().get('data', []):
+                try:
+                    d = h.get('d', [])
+                    if len(d) >
