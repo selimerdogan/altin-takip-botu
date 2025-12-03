@@ -26,4 +26,4 @@ jobs:
       - name: Scripti Çalıştır
         env:
           FIREBASE_CREDENTIALS: ${{ secrets.FIREBASE_CREDENTIALS }}
-        run: python main.py
+        run: python market_bot.py
