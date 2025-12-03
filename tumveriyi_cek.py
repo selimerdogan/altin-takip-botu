@@ -43,7 +43,7 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. DÖVİZ (YAHOO FINANCE - GARANTİ YÖNTEM)
+# 1. DÖVİZ (YAHOO FINANCE)
 # ==============================================================================
 def get_doviz_yahoo():
     print("1. Döviz Kurları (Yahoo) çekiliyor...")
@@ -56,7 +56,7 @@ def get_doviz_yahoo():
             for kur in liste:
                 try:
                     val = son.get(kur)
-                    if pd.notna(val): 
+                    if pd.notna(val):
                         key = kur.replace("TRY=X", "").replace("=X", "").replace(".NYB", "")
                         data[key] = round(float(val), 4)
                 except: continue
@@ -66,13 +66,12 @@ def get_doviz_yahoo():
     return data
 
 # ==============================================================================
-# 2. ALTIN (DOVIZ.COM - SİTE KAZIMA)
+# 2. ALTIN (DOVIZ.COM KAZIMA)
 # ==============================================================================
 def get_altin_site():
     print("2. Altın verileri çekiliyor...")
     data = {}
     try:
-        # BigPara engellediği için doviz.com'a dönüyoruz
         r = requests.get("https://altin.doviz.com/", headers=headers_general, timeout=20)
         if r.status_code == 200:
             soup = BeautifulSoup(r.content, "html.parser")
@@ -86,9 +85,9 @@ def get_altin_site():
                             if fiyat > 0: data[isim] = fiyat
                     except: continue
         else:
-            print(f"   -> ⚠️ Altın Sitesi Hatası: {r.status_code}")
+            print(f"   -> ⚠️ Altın Sitesi Hata: {r.status_code}")
     except Exception as e:
-        print(f"   -> ⚠️ Altın Bağlantı Hatası: {e}")
+        print(f"   -> ⚠️ Altın Hata: {e}")
         
     print(f"   -> ✅ Altın Bitti: {len(data)} adet.")
     return data
@@ -110,58 +109,4 @@ def get_bist_tradingview():
     try:
         r = requests.post(url, json=payload, headers=headers_general, timeout=20)
         if r.status_code == 200:
-            for h in r.json().get('data', []):
-                try:
-                    d = h.get('d', [])
-                    if len(d) > 1:
-                        data[d[0]] = float(d[1])
-                except: continue
-            print(f"   -> ✅ BIST Başarılı: {len(data)} hisse.")
-    except: pass
-    return data
-
-# ==============================================================================
-# 4. YATIRIM FONLARI (TRADINGVIEW SCANNER)
-# ==============================================================================
-def get_fon_tradingview():
-    print("4. Yatırım Fonları (TV Scanner) taranıyor...")
-    url = "https://scanner.tradingview.com/turkey/scan"
-    payload = {
-        "filter": [{"left": "type", "operation": "equal", "right": "fund"}],
-        "options": {"lang": "tr"},
-        "symbols": {"query": {"types": []}, "tickers": []},
-        "columns": ["name", "close"],
-        "range": [0, 2000]
-    }
-    data = {}
-    try:
-        r = requests.post(url, json=payload, headers=headers_general, timeout=20)
-        if r.status_code == 200:
-            for h in r.json().get('data', []):
-                try:
-                    d = h.get('d', [])
-                    if len(d) > 1:
-                        data[d[0]] = float(d[1])
-                except: continue
-            print(f"   -> ✅ Fonlar Başarılı: {len(data)} adet.")
-    except: pass
-    return data
-
-# ==============================================================================
-# 5. ABD BORSASI (TRADINGVIEW SCANNER)
-# ==============================================================================
-def get_abd_tradingview():
-    print("5. ABD Borsası (TV Scanner) taranıyor...")
-    url = "https://scanner.tradingview.com/america/scan"
-    payload = {
-        "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr"]}],
-        "options": {"lang": "en"},
-        "symbols": {"query": {"types": []}, "tickers": []},
-        "columns": ["name", "close", "market_cap_basic"],
-        "sort": {"sortBy": "market_cap_basic", "sortOrder": "desc"},
-        "range": [0, 600]
-    }
-    data = {}
-    try:
-        r = requests.post(url, json=payload, headers=headers_general, timeout=20)
-        if r.status_code == 2
+            for h in r.json().get('data', []
