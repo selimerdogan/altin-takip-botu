@@ -15,6 +15,7 @@ headers_general = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
 }
 
+# Güvenlik Kontrolü: Dosya yoksa durdur.
 if not os.path.exists("serviceAccountKey.json"):
     print("HATA: serviceAccountKey.json bulunamadı!")
     sys.exit(1)
