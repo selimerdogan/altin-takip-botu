@@ -34,4 +34,4 @@ jobs:
           echo "$FIREBASE_KEY" > serviceAccountKey.json
 
       - name: Fon Botunu Çalıştır
-        run: python tefas_bot.py
+        run: python market_bot.py
