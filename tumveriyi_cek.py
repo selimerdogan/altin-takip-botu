@@ -43,12 +43,12 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. DÖVİZ (YAHOO FINANCE - GARANTİ OLAN)
+# 1. DÖVİZ & ONS & GÜMÜŞ (YAHOO - EN POPÜLER 10)
 # ==============================================================================
 def get_doviz_yahoo():
-    print("1. Döviz Kurları (Yahoo) çekiliyor...")
+    print("1. En Popüler Dövizler (Yahoo) çekiliyor...")
     
-    # Türkiye'de en çok takip edilen kurlar
+    # Sadece en çok kullanılanlar (Demirbaş Listesi)
     liste = [
         "USDTRY=X", # Dolar
         "EURTRY=X", # Euro
@@ -58,51 +58,68 @@ def get_doviz_yahoo():
         "JPYTRY=X", # Japon Yeni
         "AUDTRY=X", # Avustralya Doları
         "SARTRY=X", # Suudi Riyali
-        "CNYTRY=X", # Çin Yuanı (Yahoo bazen vermeyebilir)
         "EURUSD=X", # Parite
         "GBPUSD=X", # Parite
-        "DX-Y.NYB"  # Dolar Endeksi
+        "DX-Y.NYB", # Dolar Endeksi
+        
+        # Global Emtialar
+        "GC=F",     # Ons Altın ($)
+        "SI=F",     # Gümüş ($)
+        "PL=F"      # Platin ($)
     ]
     
-    data = {}
+    data_doviz = {}
+    data_emtia = {}
+    
     try:
-        # Yahoo'dan toplu çek
+        # Güvenli indirme (Hata vermez)
         df = yf.download(liste, period="5d", progress=False, threads=True, auto_adjust=True, ignore_tz=True)['Close']
+        
         if not df.empty:
             son = df.ffill().iloc[-1]
-            for kur in liste:
+            for kod in liste:
                 try:
-                    val = son.get(kur)
-                    if pd.notna(val): 
-                        # İsim temizliği (USDTRY=X -> USD)
-                        key = kur.replace("TRY=X", "").replace("=X", "").replace(".NYB", "")
-                        if key.endswith("TRY"): key = key.replace("TRY", "")
+                    val = son.get(kod)
+                    if pd.notna(val):
+                        fiyat = round(float(val), 4)
                         
-                        data[key] = round(float(val), 4)
+                        # Emtiaları Ayır (Dolar bazlılar)
+                        if kod == "GC=F": data_emtia["Ons Altın"] = fiyat
+                        elif kod == "SI=F": data_emtia["Gümüş (Ons)"] = fiyat
+                        elif kod == "PL=F": data_emtia["Platin"] = fiyat
+                        else:
+                            # Dövizleri Temizle (USDTRY=X -> USD)
+                            key = kod.replace("TRY=X", "").replace("=X", "").replace(".NYB", "")
+                            if key.endswith("TRY"): key = key.replace("TRY", "")
+                            
+                            data_doviz[key] = fiyat
                 except: continue
+                
+        print(f"   -> ✅ Döviz: {len(data_doviz)} adet, Emtia: {len(data_emtia)} adet alındı.")
+            
     except Exception as e:
         print(f"   -> ⚠️ Yahoo Hata: {e}")
         
-    print(f"   -> ✅ Döviz Bitti: {len(data)} adet.")
-    return data
+    return data_doviz, data_emtia
 
 # ==============================================================================
-# 2. ALTIN (DOVIZ.COM - KAZIMA - BU ÇALIŞIYOR)
+# 2. ALTIN (TL CİNSİNDEN - DOVIZ.COM)
 # ==============================================================================
 def get_altin_site():
-    print("2. Altın verileri (doviz.com) çekiliyor...")
+    print("2. Gram/Çeyrek Altın (TL) çekiliyor...")
     data = {}
     try:
+        # Doviz.com Altın sayfası çok stabildir
         r = requests.get("https://altin.doviz.com/", headers=headers_general, timeout=20)
         if r.status_code == 200:
             soup = BeautifulSoup(r.content, "html.parser")
-            # Tablodaki verileri bul
             for tr in soup.find_all("tr"):
                 tds = tr.find_all("td")
                 if len(tds) > 2:
                     try:
                         isim = tds[0].get_text(strip=True)
-                        if "Ons" not in isim: # Ons hariç (TL olanlar)
+                        # Ons'u Yahoo'dan aldık, buradan sadece TL olanları alalım
+                        if "Ons" not in isim:
                             fiyat = metni_sayiya_cevir(tds[2].get_text(strip=True))
                             if fiyat > 0: data[isim] = fiyat
                     except: continue
@@ -132,8 +149,7 @@ def get_bist_tradingview():
             for h in r.json().get('data', []):
                 try:
                     d = h.get('d', [])
-                    if len(d) > 1:
-                        data[d[0]] = float(d[1])
+                    if len(d) > 1: data[d[0]] = float(d[1])
                 except: continue
             print(f"   -> ✅ BIST Başarılı: {len(data)} hisse.")
     except: pass
@@ -159,8 +175,7 @@ def get_fon_tradingview():
             for h in r.json().get('data', []):
                 try:
                     d = h.get('d', [])
-                    if len(d) > 1:
-                        data[d[0]] = float(d[1])
+                    if len(d) > 1: data[d[0]] = float(d[1])
                 except: continue
             print(f"   -> ✅ Fonlar Başarılı: {len(data)} adet.")
     except: pass
@@ -187,8 +202,7 @@ def get_abd_tradingview():
             for h in r.json().get('data', []):
                 try:
                     d = h.get('d', [])
-                    if len(d) > 1:
-                        data[d[0]] = float(d[1])
+                    if len(d) > 1: data[d[0]] = float(d[1])
                 except: continue
             print(f"   -> ✅ ABD Başarılı: {len(data)} hisse.")
     except: pass
@@ -219,15 +233,24 @@ def get_crypto_cmc(limit=250):
 # KAYIT (SNAPSHOT MİMARİSİ)
 # ==============================================================================
 try:
-    print("--- FİNANS BOTU (FİNAL STABİL) ---")
+    print("--- FİNANS BOTU (SADELEŞTİRİLMİŞ & GÜÇLÜ) ---")
     
+    # 1. Yahoo'dan Döviz ve Global Emtia
+    d_doviz, d_emtia = get_doviz_yahoo()
+    
+    # 2. Siteden Altın (TL)
+    d_altin_tl = get_altin_site()
+    
+    # Birleştir: Altın/Emtia tek çatı altında
+    tum_altin = {**d_altin_tl, **d_emtia}
+
     final_paket = {
-        "doviz_tl": get_doviz_yahoo(),          # Yahoo (Garanti)
-        "altin_tl": get_altin_site(),           # Doviz.com (Kazıma - Çalışıyor)
-        "borsa_tr_tl": get_bist_tradingview(),  # TV
-        "fon_tl": get_fon_tradingview(),        # TV
-        "borsa_abd_usd": get_abd_tradingview(), # TV
-        "kripto_usd": get_crypto_cmc(250),      # CMC
+        "doviz_tl": d_doviz,
+        "altin_tl": tum_altin,
+        "borsa_tr_tl": get_bist_tradingview(),
+        "borsa_abd_usd": get_abd_tradingview(),
+        "fon_tl": get_fon_tradingview(),
+        "kripto_usd": get_crypto_cmc(250),
         "timestamp": firestore.SERVER_TIMESTAMP
     }
 
