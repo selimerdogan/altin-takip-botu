@@ -175,11 +175,8 @@ def get_abd_tradingview():
             for h in r.json().get('data', []):
                 try:
                     d = h.get('d', [])
-                    
-                    # --- HATA DÜZELTİLDİ ---
-                    if len(d) > 1: 
+                    if len(d) > 1:
                         data[d[0]] = float(d[1])
-                        
                 except: continue
             print(f"   -> ✅ ABD Başarılı: {len(data)} hisse.")
     except: pass
@@ -193,4 +190,55 @@ def get_crypto_cmc(limit=250):
         print("   -> ⚠️ CMC Key Yok.")
         return {}
     print(f"6. Kripto Piyasası (CMC Top {limit}) taranıyor...")
-    url = 'https://pro-api
+    
+    url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest'
+    
+    params = {'start': '1', 'limit': str(limit), 'convert': 'USD'}
+    headers = {'Accepts': 'application/json', 'X-CMC_PRO_API_KEY': CMC_API_KEY}
+    
+    data_kripto = {}
+    try:
+        r = requests.get(url, headers=headers, params=params, timeout=20)
+        if r.status_code == 200:
+            for coin in r.json()['data']:
+                data_kripto[f"{coin['symbol']}-USD"] = round(float(coin['quote']['USD']['price']), 4)
+            print(f"   -> ✅ CMC Başarılı: {len(data_kripto)} coin.")
+    except: pass
+    return data_kripto
+
+# ==============================================================================
+# KAYIT (SNAPSHOT MİMARİSİ)
+# ==============================================================================
+try:
+    print("--- FİNANS BOTU (TOP 10 DÖVİZ - HATASIZ) ---")
+    
+    final_paket = {
+        "doviz_tl": get_doviz_top10(),
+        "altin_tl": get_altin_site(),
+        "borsa_tr_tl": get_bist_tradingview(),
+        "borsa_abd_usd": get_abd_tradingview(),
+        "fon_tl": get_fon_tradingview(),
+        "kripto_usd": get_crypto_cmc(250),
+        "timestamp": firestore.SERVER_TIMESTAMP
+    }
+
+    if any(len(v) > 0 for k,v in final_paket.items() if isinstance(v, dict)):
+        simdi = datetime.now()
+        doc_id = simdi.strftime("%Y-%m-%d")
+        saat = simdi.strftime("%H:%M")
+        
+        day_ref = db.collection(u'market_history').document(doc_id)
+        day_ref.set({'date': doc_id}, merge=True)
+        
+        hour_ref = day_ref.collection(u'snapshots').document(saat)
+        hour_ref.set(final_paket)
+        
+        total = sum(len(v) for k,v in final_paket.items() if isinstance(v, dict))
+        print(f"🎉 BAŞARILI: [{doc_id} - {saat}] Toplam {total} veri kaydedildi.")
+    else:
+        print("❌ HATA: Veri yok!")
+        sys.exit(1)
+
+except Exception as e:
+    print(f"KRİTİK HATA: {e}")
+    sys.exit(1)
