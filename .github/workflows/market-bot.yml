@@ -25,7 +25,7 @@ jobs:
 
       # --- BURASI GÜNCELLENDİ (yfinance EKLENDİ) ---
       - name: Kütüphaneleri Yükle
-        run: pip install firebase-admin requests pandas yfinance beautifulsoup4
+        run: pip install firebase-admin requests pandas yfinance beautifulsoup4 selenium webdriver-manager
 
       - name: Botu Çalıştır
         env:
