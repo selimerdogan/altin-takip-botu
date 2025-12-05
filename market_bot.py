@@ -53,25 +53,27 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. DÖVİZ (KAYNAK: FOREKS.COM - SELENIUM İLE)
+# 1. DÖVİZ (KAYNAK: FOREKS.COM - SELENIUM İLE - GÖRSEL DOĞRULAMALI)
 # ==============================================================================
 def get_doviz_foreks():
     print("1. Döviz Kurları (Foreks.com - Selenium) çekiliyor...")
     data = {}
     
+    # Sitedeki isimler ile senin veritabanı kodların arasındaki eşleştirme
     isim_map = {
-        "ABD Doları": "USD",
-        "Euro": "EUR",
-        "İngiliz Sterlini": "GBP",
+        "Dolar": "USD",          # Görselde "Dolar" olarak geçiyor
+        "Euro": "EUR",           # Görselde "Euro" olarak geçiyor
+        "Sterlin": "GBP",        # Görselde "Sterlin" olarak geçiyor
         "İsviçre Frangı": "CHF",
         "Kanada Doları": "CAD",
         "Japon Yeni": "JPY",        
-        "Avustralya Doları": "AUD"
+        "Rus Rublesi": "RUB",    # Görselde var, ekledim (İstersen kaldırabilirsin)
+        "Çin Yuanı": "CNY"       # Görselde var, ekledim
     }
 
     url = "https://www.foreks.com/doviz/"
     
-    # Tarayıcı Ayarları (Headless: Ekranda pencere açmadan çalışır)
+    # --- Tarayıcı Ayarları ---
     chrome_options = Options()
     chrome_options.add_argument("--headless") 
     chrome_options.add_argument("--no-sandbox")
@@ -81,56 +83,60 @@ def get_doviz_foreks():
 
     driver = None
     try:
-        # Tarayıcıyı başlat
         driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
         driver.get(url)
+        time.sleep(5) # Sayfanın yüklenmesi için bekleme süresi
         
-        # Sitenin verileri yüklemesi için kısa bir bekleme (5 sn)
-        time.sleep(5)
-        
-        # Sayfanın yüklenmiş HTML kaynağını al
-        page_source = driver.page_source
-        soup = BeautifulSoup(page_source, "html.parser")
+        soup = BeautifulSoup(driver.page_source, "html.parser")
         
         # Tablo satırlarını bul
+        # Foreks'te veriler genelde 'tbody' içindeki 'tr'lerde olur
         rows = soup.find_all("tr")
         
         for row in rows:
             text_row = row.get_text()
             
+            # 1. İsim Eşleşmesi Kontrolü
             found_key = None
             for tr_name, kod in isim_map.items():
+                # "Amerikan Doları" veya sadece "Dolar" geçebilir, görselde "Dolar" başlıkta büyük yazıyor
                 if tr_name in text_row:
                     found_key = kod
                     break
             
             if found_key:
                 cols = row.find_all("td")
-                # Foreks yapısı: Sayısal değerler genelde sonlardadır.
-                # Selenium ile tam render olduğu için HTML yapısı daha düzenli gelir.
-                if len(cols) >= 5:
+                
+                # GÖRSELE GÖRE SÜTUN ANALİZİ:
+                # cols[0] -> Sembol (İsim/Bayrak)
+                # cols[1] -> Son (FİYAT) -> Örn: 42,5273
+                # cols[2] -> Fark % (DEĞİŞİM) -> Örn: %0,07
+                # cols[3] -> Fark
+                # cols[4] -> Alış
+                # cols[5] -> Satış
+                
+                if len(cols) >= 3:
                     try:
-                        # Bu indexler Foreks.com'un anlık yapısına göredir
-                        # Genelde: İsim(0), Son(1), %Fark(2)... gibi gidebilir veya
-                        # Alış(2), Satış(3) olabilir.
+                        # Fiyat için 'Son' sütununu (index 1) alıyoruz
+                        fiyat_raw = cols[1].get_text(strip=True)
                         
-                        # Garantici yöntem: Satırdaki tüm metinleri alıp sayıya benzeyenleri bulalım
-                        # Ancak standart Foreks tablosunda genelde:
-                        # 0: Sembol, 1: Son, 2: %, 3: Alış, 4: Satış...
+                        # Değişim için 'Fark %' sütununu (index 2) alıyoruz
+                        degisim_raw = cols[2].get_text(strip=True)
                         
-                        # Biz direkt 3 (Alış) ve 4 (Satış) deneyelim, olmazsa 1 (Son) deneriz.
-                        satis_raw = cols[3].get_text(strip=True) if len(cols) > 3 else cols[1].get_text(strip=True)
-                        degisim_raw = cols[4].get_text(strip=True) if len(cols) > 4 else cols[2].get_text(strip=True)
-                        
-                        fiyat = metni_sayiya_cevir(satis_raw)
+                        fiyat = metni_sayiya_cevir(fiyat_raw)
                         degisim = metni_sayiya_cevir(degisim_raw)
                         
+                        # Eğer fiyat 0 geldiyse (bazen Son boş olabilir), Satış'ı (index 5) dene
+                        if fiyat == 0 and len(cols) > 5:
+                             fiyat_raw = cols[5].get_text(strip=True)
+                             fiyat = metni_sayiya_cevir(fiyat_raw)
+
                         if fiyat > 0:
                             data[found_key] = {
                                 "price": fiyat,
                                 "change": degisim
                             }
-                    except:
+                    except Exception as inner_e:
                         continue
 
         print(f"   -> ✅ Foreks Döviz Bitti: {len(data)} adet.")
@@ -139,7 +145,7 @@ def get_doviz_foreks():
         print(f"   -> ⚠️ Foreks Selenium Hatası: {e}")
     finally:
         if driver:
-            driver.quit() # Tarayıcıyı bellekten temizle
+            driver.quit()
         
     return data
 
@@ -287,3 +293,4 @@ try:
 except Exception as e:
     print(f"KRİTİK HATA: {e}")
     sys.exit(1)
+
