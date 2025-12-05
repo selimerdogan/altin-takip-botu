@@ -6,3 +6,5 @@ openpyxl
 beautifulsoup4
 yfinance
 tefas
+selenium
+webdriver-manager
