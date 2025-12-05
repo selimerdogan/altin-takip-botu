@@ -68,8 +68,8 @@ def get_doviz_foreks():
         "Kanada Doları": "CAD",
         "Japon Yeni": "JPY",        
         "Rus Rublesi": "RUB",    # Görselde var, ekledim (İstersen kaldırabilirsin)
-        "Çin Yuanı": "CNY"       # Görselde var, ekledim
-         "BAE Dirhemi": "BAE"       # Görselde var, ekledim
+        "Çin Yuanı": "CNY",       # Görselde var, ekledim
+        "BAE Dirhemi": "BAE"       # Görselde var, ekledim
     }
 
     url = "https://www.foreks.com/doviz/"
@@ -294,5 +294,6 @@ try:
 except Exception as e:
     print(f"KRİTİK HATA: {e}")
     sys.exit(1)
+
 
 
