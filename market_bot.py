@@ -5,7 +5,6 @@ from datetime import datetime
 import sys
 import os
 import json
-import yfinance as yf
 import pandas as pd
 import warnings
 from bs4 import BeautifulSoup
@@ -14,8 +13,11 @@ from bs4 import BeautifulSoup
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 # --- AYARLAR ---
+# Foreks.com gibi siteler için tarayıcı gibi davranan güçlü header
 headers_general = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://www.google.com/",
+    "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
 }
 
 # --- KİMLİK KONTROLLERİ ---
@@ -39,6 +41,9 @@ except Exception as e:
     sys.exit(1)
 
 def metni_sayiya_cevir(metin):
+    """
+    Örnek Girdi: "34,50 TL" -> Çıktı: 34.50
+    """
     try:
         temiz = str(metin).replace('TL', '').replace('USD', '').replace('$', '').replace('%', '').strip()
         if "," in temiz:
@@ -48,46 +53,72 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. DÖVİZ (YAHOO - EN POPÜLER 10 + DEĞİŞİM)
+# 1. DÖVİZ (KAYNAK: FOREKS.COM - YENİ)
 # ==============================================================================
-def get_doviz_top10():
-    print("1. Top 10 Döviz Kuru (Yahoo) çekiliyor...")
-    
-    liste = [
-        "USDTRY=X", "EURTRY=X", "GBPTRY=X", "CHFTRY=X", "CADTRY=X", 
-        "JPYTRY=X", "AUDTRY=X", "EURUSD=X", "GBPUSD=X", "DX-Y.NYB"
-    ]
-    
+def get_doviz_foreks():
+    print("1. Döviz Kurları (Foreks.com) çekiliyor...")
     data = {}
+    
+    # Foreks'teki görünen adları senin ID'lerine eşliyoruz
+    isim_map = {
+        "ABD Doları": "USD",
+        "Euro": "EUR",
+        "İngiliz Sterlini": "GBP",
+        "İsviçre Frangı": "CHF",
+        "Kanada Doları": "CAD",
+        "Japon Yeni": "JPY",        
+        "Avustralya Doları": "AUD"
+    }
+
+    url = "https://www.foreks.com/doviz/"
+    
     try:
-        # threads=False veritabanı kilidini önler
-        df = yf.download(liste, period="5d", progress=False, threads=False, auto_adjust=True, ignore_tz=True)['Close']
+        r = requests.get(url, headers=headers_general, timeout=20)
         
-        if not df.empty:
-            df = df.ffill()
-            bugun = df.iloc[-1]
-            dun = df.iloc[-2] if len(df) > 1 else df.iloc[-1]
-
-            for kod in liste:
-                try:
-                    val = bugun.get(kod)
-                    val_prev = dun.get(kod)
-
-                    if pd.notna(val) and pd.notna(val_prev):
-                        # İsim temizliği
-                        key = kod.replace("TRY=X", "").replace("=X", "").replace(".NYB", "")
-                        if key.endswith("TRY"): key = key.replace("TRY", "")
-                        
-                        fiyat = float(val)
-                        eski = float(val_prev)
-                        degisim = ((fiyat - eski) / eski) * 100
-
-                        data[key] = {"price": round(fiyat, 4), "change": round(degisim, 2)}
-                except: continue
+        if r.status_code == 200:
+            soup = BeautifulSoup(r.content, "html.parser")
+            
+            # Foreks'te veriler tablo satırları (tr) içindedir
+            rows = soup.find_all("tr")
+            
+            for row in rows:
+                text_row = row.get_text() # Satırın tamamını metin olarak al
                 
-        print(f"   -> ✅ Döviz Bitti: {len(data)} adet.")
+                # Bu satırda bizim istediğimiz paralardan biri var mı?
+                found_key = None
+                for tr_name, kod in isim_map.items():
+                    if tr_name in text_row:
+                        found_key = kod
+                        break
+                
+                if found_key:
+                    cols = row.find_all("td")
+                    # Foreks tablosu genelde: [İsim, Sembol, Alış, Satış, %Fark, ...]
+                    # Sayısal değerlerin olduğu sütunları hedefliyoruz.
+                    if len(cols) >= 5:
+                        try:
+                            # 3. index genelde Satış Fiyatıdır (Piyasa değeri)
+                            satis_raw = cols[3].get_text(strip=True)
+                            # 4. veya 5. index % Değişimdir (Sütun yapısına göre değişebilir, genelde yan yanadır)
+                            degisim_raw = cols[4].get_text(strip=True)
+                            
+                            fiyat = metni_sayiya_cevir(satis_raw)
+                            degisim = metni_sayiya_cevir(degisim_raw)
+                            
+                            if fiyat > 0:
+                                data[found_key] = {
+                                    "price": fiyat,
+                                    "change": degisim
+                                }
+                        except:
+                            continue
+
+            print(f"   -> ✅ Foreks Döviz Bitti: {len(data)} adet.")
+        else:
+            print(f"   -> ⚠️ Bağlantı Hatası: {r.status_code}")
+
     except Exception as e:
-        print(f"   -> ⚠️ Döviz Hata: {e}")
+        print(f"   -> ⚠️ Foreks Hata: {e}")
         
     return data
 
@@ -210,10 +241,10 @@ def get_crypto_cmc(limit=250):
 # KAYIT (SNAPSHOT MİMARİSİ)
 # ==============================================================================
 try:
-    print("--- PİYASA BOTU (DEĞİŞİM ORANLI) ---")
+    print("--- PİYASA BOTU (DEĞİŞİM ORANLI) - FOREKS ENTEGRASYONU ---")
     
     final_paket = {
-        "doviz_tl": get_doviz_top10(),
+        "doviz_tl": get_doviz_foreks(),    # YENİ FOREKS FONKSİYONU
         "altin_tl": get_altin_site(),
         "borsa_tr_tl": get_bist_tradingview(),
         "borsa_abd_usd": get_abd_tradingview(),
@@ -221,6 +252,7 @@ try:
         "timestamp": firestore.SERVER_TIMESTAMP
     }
 
+    # Eğer en az bir sözlük doluysa kaydet
     if any(len(v) > 0 for k,v in final_paket.items() if isinstance(v, dict)):
         simdi = datetime.now()
         doc_id = simdi.strftime("%Y-%m-%d")
@@ -235,7 +267,7 @@ try:
         total = sum(len(v) for k,v in final_paket.items() if isinstance(v, dict))
         print(f"🎉 BAŞARILI: [{doc_id} - {saat}] Toplam {total} veri kaydedildi.")
     else:
-        print("❌ HATA: Veri yok!")
+        print("❌ HATA: Veri çekilemedi (Tüm kaynaklar boş)!")
         sys.exit(1)
 
 except Exception as e:
