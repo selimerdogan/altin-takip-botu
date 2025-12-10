@@ -22,7 +22,7 @@ jobs:
           python-version: '3.11'
 
       - name: Kütüphaneleri Yükle
-        run: pip install firebase-admin requests pandas yfinance beautifulsoup4 selenium webdriver-manager
+        run: pip install firebase-admin requests pandas yfinance beautifulsoup4 selenium webdriver-manager tefas-crawler
 
       - name: Botu Çalıştır
         env:
