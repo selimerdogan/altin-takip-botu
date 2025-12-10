@@ -1,15 +1,12 @@
-name: Piyasa Botu (Hafta İci)
+name: Piyasa Botu (10:00 - 18:30)
 
 on:
   schedule:
-    # UTC Saatleri (TR = UTC + 3)
-    # 07:20 UTC = 10:20 TR (Açılış)
-    - cron: '20 7 * * 1-5'
-    # 08:00 - 15:00 UTC = 11:00 - 18:00 TR (Saat Başı)
-    - cron: '0 8-15 * * 1-5'
-    # 15:15 UTC = 18:15 TR (Kapanış)
-    - cron: '15 15 * * 1-5'
-  
+    # Hafta içi her gün
+    # UTC 07:00 (TR 10:00) ile UTC 15:30 (TR 18:30) arası
+    # Her 00 ve 30 geçe çalış.
+    - cron: '0,30 7-15 * * 1-5'
+
   workflow_dispatch:
 
 jobs:
@@ -18,12 +15,12 @@ jobs:
     steps:
       - name: Kodları Çek
         uses: actions/checkout@v3
+
       - name: Python Kur
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      # --- BURASI GÜNCELLENDİ (yfinance EKLENDİ) ---
       - name: Kütüphaneleri Yükle
         run: pip install firebase-admin requests pandas yfinance beautifulsoup4 selenium webdriver-manager
 
