@@ -262,33 +262,59 @@ def get_crypto_cmc(limit=250):
     return data
 
 # ==============================================================================
-# KAYIT
+# KAYIT (REVİZE EDİLMİŞ - HİBRİT YAPI)
 # ==============================================================================
 try:
     print("--- PİYASA BOTU (DEĞİŞİM ORANLI) - FOREKS SELENIUM ---")
     
+    # Veri Paketini Oluştur
     final_paket = {
         "doviz_tl": get_doviz_foreks(),
         "altin_tl": get_altin_site(),
         "borsa_tr_tl": get_bist_tradingview(),
         "borsa_abd_usd": get_abd_tradingview(),
         "kripto_usd": get_crypto_cmc(250),
-        "timestamp": firestore.SERVER_TIMESTAMP
+        "last_updated": firestore.SERVER_TIMESTAMP # "timestamp" yerine last_updated daha anlaşılır
     }
 
+    # Eğer veri doluysa işlemlere başla
     if any(len(v) > 0 for k,v in final_paket.items() if isinstance(v, dict)):
+        
         simdi = datetime.now()
-        doc_id = simdi.strftime("%Y-%m-%d")
-        saat = simdi.strftime("%H:%M")
+
+        # -------------------------------------------------------------
+        # ADIM 1: CANLI VERİYİ GÜNCELLE (Uygulamanın okuyacağı yer)
+        # -------------------------------------------------------------
+        # Bu işlem her çalışmada yapılır. Eski veriyi ezer, yenisini yazar.
+        # Bu sayede veritabanı şişmez ve uygulaman her zaman tek doküman okur.
+        try:
+            db.collection(u'market_data').document(u'LIVE_PRICES').set(final_paket)
+            print(f"✅ [{simdi.strftime('%H:%M:%S')}] CANLI Fiyatlar 'LIVE_PRICES' dosyasına yazıldı.")
+        except Exception as e:
+            print(f"❌ Canlı veri yazma hatası: {e}")
+
+        # -------------------------------------------------------------
+        # ADIM 2: GEÇMİŞİ ARŞİVLE (Grafikler için)
+        # -------------------------------------------------------------
+        # Sadece saat başlarında ve buçuklarda (00 ve 30 geçe) kayıt alıyoruz.
+        # İstersen bu aralığı değiştirebilirsin (örn: simdi.minute == 0 -> Sadece saat başı)
         
-        day_ref = db.collection(u'market_history').document(doc_id)
-        day_ref.set({'date': doc_id}, merge=True)
-        day_ref.collection(u'snapshots').document(saat).set(final_paket, merge=True)
-        
-        total = sum(len(v) for k,v in final_paket.items() if isinstance(v, dict))
-        print(f"🎉 BAŞARILI: [{doc_id} - {saat}] Toplam {total} veri kaydedildi.")
+        if simdi.minute % 30 == 0:
+            doc_id = simdi.strftime("%Y-%m-%d") # 2025-12-10
+            saat_str = simdi.strftime("%H:%M")  # 14:30
+            
+            day_ref = db.collection(u'market_history').document(doc_id)
+            # Günlük dokümanı oluştur (yoksa)
+            day_ref.set({'date': doc_id}, merge=True)
+            # O saatin snapshot'ını kaydet
+            day_ref.collection(u'snapshots').document(saat_str).set(final_paket, merge=True)
+            
+            print(f"💾 [{doc_id} - {saat_str}] TARİHÇE Arşivlendi (Grafik Verisi).")
+        else:
+            print(f"⏩ [{simdi.strftime('%H:%M')}] Tarihçe atlandı (Tasarruf Modu).")
+
     else:
-        print("❌ HATA: Veri çekilemedi!")
+        print("❌ HATA: Veri çekilemedi, paket boş!")
         sys.exit(1)
 
 except Exception as e:
