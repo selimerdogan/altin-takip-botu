@@ -59,6 +59,7 @@ def metni_sayiya_cevir(metin):
 # ==============================================================================
 # 1. DÖVİZ (KAYNAK: FOREKS.COM - SELENIUM İLE)
 # ==============================================================================
+
 def get_doviz_foreks():
     print("1. Döviz Kurları (Foreks.com - Selenium) çekiliyor...")
     data = {}
@@ -76,7 +77,8 @@ def get_doviz_foreks():
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument(f"user-agent={headers_general['User-Agent']}")
+    # headers_general'ın projenin yukarısında tanımlı olduğu varsayılıyor
+    # chrome_options.add_argument(f"user-agent={headers_general['User-Agent']}")
 
     driver = None
     try:
@@ -89,6 +91,15 @@ def get_doviz_foreks():
         
         for row in rows:
             text_row = row.get_text()
+
+            # --- DÜZELTME BURADA ---
+            # "Bitcoin" kelimesi geçen satırları direkt atlıyoruz.
+            # Böylece hem listeye girmiyor hem de "Bitcoin Amerikan Doları" yazısı
+            # normal "Dolar" verisini bozamıyor.
+            if "Bitcoin" in text_row:
+                continue
+            # -----------------------
+            
             found_key = None
             for tr_name, kod in isim_map.items():
                 if tr_name in text_row:
@@ -101,6 +112,7 @@ def get_doviz_foreks():
                     try:
                         fiyat_raw = cols[1].get_text(strip=True)
                         degisim_raw = cols[2].get_text(strip=True)
+                        
                         fiyat = metni_sayiya_cevir(fiyat_raw)
                         degisim = metni_sayiya_cevir(degisim_raw)
                         
@@ -347,3 +359,4 @@ try:
 except Exception as e:
     print(f"KRİTİK HATA: {e}")
     sys.exit(1)
+
