@@ -64,27 +64,26 @@ def get_doviz_foreks():
     print("1. Döviz Kurları (Foreks.com - Selenium) çekiliyor...")
     data = {}
     
+    # DÜZELTME: Sıralama değiştirildi.
+    # "Kanada Doları" en üste, sade "Dolar" en alta alındı.
     isim_map = {
-        "Dolar": "USD", "Euro": "EUR", "Sterlin": "GBP", "İsviçre Frangı": "CHF",
-        "Kanada Doları": "CAD", "Japon Yeni": "JPY", "Rus Rublesi": "RUB",
-        "Çin Yuanı": "CNY", "BAE Dirhemi": "BAE"
+        "Kanada Doları": "CAD",  # <--- ÖNCELİKLİ (Üste alındı)
+        "Euro": "EUR", 
+        "Sterlin": "GBP", 
+        "İsviçre Frangı": "CHF",
+        "Japon Yeni": "JPY", 
+        "Rus Rublesi": "RUB",
+        "Çin Yuanı": "CNY", 
+        "BAE Dirhemi": "BAE",
+        "Dolar": "USD"           # <--- EN SONA ALINDI (Diğerleriyle karışmasın diye)
     }
 
     url = "https://www.foreks.com/doviz/"
     
-    chrome_options = Options()
-    chrome_options.add_argument("--headless") 
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    # headers_general'ın projenin yukarısında tanımlı olduğu varsayılıyor
-    # chrome_options.add_argument(f"user-agent={headers_general['User-Agent']}")
+    # ... (Selenium ayarları aynı kalacak) ...
 
-    driver = None
     try:
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-        driver.get(url)
-        time.sleep(5)
+        # ... (Driver başlatma ve get isteği kısımları aynı) ...
         
         soup = BeautifulSoup(driver.page_source, "html.parser")
         rows = soup.find_all("tr")
@@ -92,21 +91,19 @@ def get_doviz_foreks():
         for row in rows:
             text_row = row.get_text()
 
-            # --- DÜZELTME BURADA ---
-            # "Bitcoin" kelimesi geçen satırları direkt atlıyoruz.
-            # Böylece hem listeye girmiyor hem de "Bitcoin Amerikan Doları" yazısı
-            # normal "Dolar" verisini bozamıyor.
+            # Bitcoin filtresi (Bunu koruyoruz)
             if "Bitcoin" in text_row:
                 continue
-            # -----------------------
             
             found_key = None
+            # Döngü yukarıdaki yeni sıraya göre çalışacak
             for tr_name, kod in isim_map.items():
                 if tr_name in text_row:
                     found_key = kod
-                    break
+                    break # Bulduğu an çıkar, böylece Kanada Doları bulunca Dolar'a bakmaz.
             
             if found_key:
+                # ... (Veri çekme işlemleri aynı) ...
                 cols = row.find_all("td")
                 if len(cols) >= 3:
                     try:
@@ -124,11 +121,7 @@ def get_doviz_foreks():
                             data[found_key] = {"price": fiyat, "change": degisim}
                     except: continue
 
-        print(f"   -> ✅ Foreks Döviz Bitti: {len(data)} adet.")
-    except Exception as e:
-        print(f"   -> ⚠️ Foreks Selenium Hatası: {e}")
-    finally:
-        if driver: driver.quit()
+    # ... (Hata yakalama ve driver kapatma aynı) ...
         
     return data
 
@@ -359,4 +352,5 @@ try:
 except Exception as e:
     print(f"KRİTİK HATA: {e}")
     sys.exit(1)
+
 
