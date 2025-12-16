@@ -65,7 +65,6 @@ def get_doviz_foreks():
     data = {}
     
     # SIRALAMA ÖNEMLİ:
-    # "Kanada Doları" gibi özel isimler en üste, "Dolar" en alta.
     isim_map = {
         "Kanada Doları": "CAD", 
         "Euro": "EUR", 
@@ -86,9 +85,6 @@ def get_doviz_foreks():
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     
-    # Eğer headers_general yukarıda tanımlı değilse bu satırı yorum satırı yapın:
-    # chrome_options.add_argument(f"user-agent={headers_general['User-Agent']}")
-
     driver = None
     try:
         driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
@@ -106,9 +102,12 @@ def get_doviz_foreks():
                 continue
             
             found_key = None
+            found_name = None # Uzun isim için değişken
+
             for tr_name, kod in isim_map.items():
                 if tr_name in text_row:
                     found_key = kod
+                    found_name = tr_name # Uzun ismi yakala (Örn: Kanada Doları)
                     break 
             
             if found_key:
@@ -126,7 +125,12 @@ def get_doviz_foreks():
                              fiyat = metni_sayiya_cevir(fiyat_raw)
 
                         if fiyat > 0:
-                            data[found_key] = {"price": fiyat, "change": degisim}
+                            # 'name' alanı eklendi
+                            data[found_key] = {
+                                "price": fiyat, 
+                                "change": degisim, 
+                                "name": found_name
+                            }
                     except: continue
 
         print(f"   -> ✅ Foreks Döviz Bitti: {len(data)} adet.")
@@ -160,7 +164,12 @@ def get_altin_site():
                                 fiyat = metni_sayiya_cevir(tds[2].get_text(strip=True))
                                 degisim = metni_sayiya_cevir(tds[3].get_text(strip=True))
                                 if fiyat > 0: 
-                                    data[isim] = {"price": fiyat, "change": degisim}
+                                    # 'name' alanı eklendi (isim ile aynı)
+                                    data[isim] = {
+                                        "price": fiyat, 
+                                        "change": degisim, 
+                                        "name": isim
+                                    }
                         except: continue
     except Exception as e:
         print(f"   -> ⚠️ Altın Hata: {e}")
@@ -174,12 +183,12 @@ def get_bist_tradingview():
     print("3. Borsa İstanbul (TV Scanner) taranıyor...")
     url = "https://scanner.tradingview.com/turkey/scan"
     
-    # DÜZELTİLDİ: Yıldız karakterleri temizlendi
+    # 'description' sütunu eklendi (Uzun isim için)
     payload = {
         "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr"]}],
         "options": {"lang": "tr"},
         "symbols": {"query": {"types": []}, "tickers": []},
-        "columns": ["name", "close", "change"],
+        "columns": ["name", "close", "change", "description"],
         "range": [0, 1000]
     }
     data = {}
@@ -189,8 +198,13 @@ def get_bist_tradingview():
             for h in r.json().get('data', []):
                 try:
                     d = h.get('d', [])
-                    if len(d) > 2:
-                        data[d[0]] = {"price": float(d[1]), "change": round(float(d[2]), 2)}
+                    if len(d) > 3:
+                        # d[0]=Kod, d[1]=Fiyat, d[2]=Değişim, d[3]=Uzun İsim
+                        data[d[0]] = {
+                            "price": float(d[1]), 
+                            "change": round(float(d[2]), 2),
+                            "name": d[3] # Uzun isim eklendi
+                        }
                 except: continue
             print(f"   -> ✅ BIST Başarılı: {len(data)} hisse.")
     except: pass
@@ -203,12 +217,12 @@ def get_abd_tradingview():
     print("4. ABD Borsası (TV Scanner) taranıyor...")
     url = "https://scanner.tradingview.com/america/scan"
     
-    # DÜZELTİLDİ: Yıldız karakterleri temizlendi
+    # 'description' sütunu eklendi
     payload = {
         "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr"]}],
         "options": {"lang": "en"},
         "symbols": {"query": {"types": []}, "tickers": []},
-        "columns": ["name", "close", "change", "market_cap_basic"],
+        "columns": ["name", "close", "change", "market_cap_basic", "description"],
         "sort": {"sortBy": "market_cap_basic", "sortOrder": "desc"},
         "range": [0, 600]
     }
@@ -219,8 +233,13 @@ def get_abd_tradingview():
             for h in r.json().get('data', []):
                 try:
                     d = h.get('d', [])
-                    if len(d) > 2:
-                        data[d[0]] = {"price": float(d[1]), "change": round(float(d[2]), 2)}
+                    if len(d) > 4:
+                        # d[0]=Kod, d[1]=Fiyat, d[2]=Değişim, d[3]=MarketCap, d[4]=Uzun İsim
+                        data[d[0]] = {
+                            "price": float(d[1]), 
+                            "change": round(float(d[2]), 2),
+                            "name": d[4] # Uzun isim eklendi
+                        }
                 except: continue
             print(f"   -> ✅ ABD Başarılı: {len(data)} hisse.")
     except: pass
@@ -243,9 +262,12 @@ def get_crypto_cmc(limit=250):
         if r.status_code == 200:
             for coin in r.json()['data']:
                 quote = coin['quote']['USD']
-                data[f"{coin['symbol']}-USD"] = {
+                symbol = coin['symbol']
+                # 'name' alanı eklendi (Örn: Bitcoin)
+                data[f"{symbol}-USD"] = {
                     "price": round(float(quote['price']), 4),
-                    "change": round(float(quote['percent_change_24h']), 2)
+                    "change": round(float(quote['percent_change_24h']), 2),
+                    "name": coin['name'] 
                 }
             print(f"   -> ✅ CMC Başarılı: {len(data)} coin.")
     except: pass
@@ -293,7 +315,7 @@ def get_tefas_lib():
             data[kod] = {
                 "price": float(item['price']),
                 "change": round(float(item['degisim']), 2),
-                "name": item.get('title', '')
+                "name": item.get('title', '') # Bu kısım zaten vardı, korundu.
             }
             
         print(f"   -> ✅ TEFAS Başarılı: {len(data)} fon çekildi.")
@@ -324,13 +346,11 @@ try:
     if any(len(v) > 0 for k,v in final_paket.items() if isinstance(v, dict)):
         
         # GitHub sunucusu UTC çalışır. Biz Türkiye saatini (UTC+3) hesaplıyoruz.
-        # Bu sayede sunucunun saati ne olursa olsun bizim saatimiz doğru olur.
         tr_saat = datetime.utcnow() + timedelta(hours=3)
         
         # -------------------------------------------------------------
         # ADIM 1: CANLI VERİYİ GÜNCELLE (Her zaman çalışır)
         # -------------------------------------------------------------
-        # Bu kısım uygulamanın anlık gördüğü veridir.
         try:
             db.collection(u'market_data').document(u'LIVE_PRICES').set(final_paket)
             print(f"✅ [{tr_saat.strftime('%H:%M:%S')}] CANLI Fiyatlar güncellendi.")
@@ -340,10 +360,6 @@ try:
         # -------------------------------------------------------------
         # ADIM 2: KAPANIŞI ARŞİVLE (Sadece 18:30 Seansı)
         # -------------------------------------------------------------
-        # Mantık: Saat 18 olsun VE Dakika 20'den büyük olsun.
-        # - Saat 18:00'deki çalışmada dakika 00-10 arasıdır -> KAYDETMEZ.
-        # - Saat 18:30'daki çalışmada dakika 30'dur -> KAYDEDER.
-        # - Gecikme olsa bile (örn: 18:45) -> 45 > 20 -> YİNE KAYDEDER.
         
         if tr_saat.hour == 18 and tr_saat.minute >= 20:
             
@@ -366,6 +382,3 @@ try:
 except Exception as e:
     print(f"KRİTİK HATA: {e}")
     sys.exit(1)
-
-
-
