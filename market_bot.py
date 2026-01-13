@@ -8,17 +8,11 @@ import json
 import warnings
 from bs4 import BeautifulSoup
 import time
-import finnhub
 import pandas as pd
+import finnhub # <-- YENİ EKLENEN (Selenium yerine)
 
 # --- YENİ EKLENEN KÜTÜPHANE (TEFAS) ---
 from tefas import Crawler
-
-# --- SELENIUM KÜTÜPHANELERİ ---
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
 
 # Gereksiz uyarıları kapat
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -58,32 +52,20 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. DÖVİZ (FİNNHUB API) - GÜNCELLENDİ
+# 1. DÖVİZ (FİNNHUB API - SELENIUMSUZ 🚀)
 # ==============================================================================
 def get_doviz_finnhub():
     print("1. Döviz Kurları (Finnhub) çekiliyor...")
     
-    # -----------------------------------------------------------
-    # 🔑 API KEY AYARI
-    # 1. GitHub'da çalışırken Secret'tan okur.
-    # 2. Bilgisayarında test ederken elle yazdığını okur.
-    # -----------------------------------------------------------
-    api_key = os.environ.get('FINNHUB_API_KEY') 
-    
+    # API KEY KONTROLÜ
+    api_key = os.environ.get('FINNHUB_API_KEY')
     if not api_key:
-        # TEST İÇİN: Kendi aldığın key'i tırnak içine yapıştır:
-        api_key = "sandbox_c... (BURAYA SENİN KEY GELECEK)" 
-
-    if not api_key or "BURAYA" in api_key:
-        print("   ⚠️ Finnhub API Key eksik! (Lütfen kodu düzenleyip keyi ekle)")
+        print("   ⚠️ Finnhub API Key bulunamadı! (Secrets kontrol et)")
         return {}
-    
-    # Bağlantıyı kur
+
     finnhub_client = finnhub.Client(api_key=api_key)
     data = {}
     
-    # İSTEDİĞİN DÖVİZLER LİSTESİ
-    # Finnhub'dan 150 tane veri gelir, biz sadece bunları seçip alacağız.
     sembol_map = {
         "EUR": "Euro",
         "GBP": "Sterlin",
@@ -96,26 +78,24 @@ def get_doviz_finnhub():
     }
 
     try:
-        # Tek istekte 150+ para birimi gelir
+        # Tek istekte veriyi al
         rates_response = finnhub_client.forex_rates(base='USD')
         quotes = rates_response.get('quote', {})
         
-        # 1. Dolar/TL'yi bul (Bazı verilerde TRY, bazılarında USDTRY yazar)
+        # 1. Dolar/TL
         dolar_tl = quotes.get('TRY', 0)
         
         if dolar_tl > 0:
-            # Doları ekle
             data["USD"] = {
                 "price": round(float(dolar_tl), 4),
-                "change": 0.0, # Finnhub ücretsiz planda anlık değişim % vermez
+                "change": 0.0,
                 "name": "Dolar"
             }
 
-            # 2. Diğerlerini TL'ye çevirip ekle
+            # 2. Diğer Kurlar (Çapraz Kur Hesabı)
             for kod, isim in sembol_map.items():
                 try:
-                    # Çapraz Kur: (Dolar/TL) / (Dolar/X_Para)
-                    parite = quotes.get(kod, 0) 
+                    parite = quotes.get(kod, 0)
                     if parite > 0:
                         tl_karsiligi = dolar_tl / parite
                         data[kod] = {
@@ -131,6 +111,7 @@ def get_doviz_finnhub():
     except Exception as e:
         print(f"   -> ⚠️ Finnhub Hatası: {e}")
         return {}
+
 # ==============================================================================
 # 2. ALTIN (DOVIZ.COM)
 # ==============================================================================
@@ -152,7 +133,6 @@ def get_altin_site():
                                 fiyat = metni_sayiya_cevir(tds[2].get_text(strip=True))
                                 degisim = metni_sayiya_cevir(tds[3].get_text(strip=True))
                                 if fiyat > 0: 
-                                    # 'name' alanı eklendi (isim ile aynı)
                                     data[isim] = {
                                         "price": fiyat, 
                                         "change": degisim, 
@@ -171,7 +151,6 @@ def get_bist_tradingview():
     print("3. Borsa İstanbul (TV Scanner) taranıyor...")
     url = "https://scanner.tradingview.com/turkey/scan"
     
-    # 'description' sütunu eklendi (Uzun isim için)
     payload = {
         "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr"]}],
         "options": {"lang": "tr"},
@@ -187,11 +166,10 @@ def get_bist_tradingview():
                 try:
                     d = h.get('d', [])
                     if len(d) > 3:
-                        # d[0]=Kod, d[1]=Fiyat, d[2]=Değişim, d[3]=Uzun İsim
                         data[d[0]] = {
                             "price": float(d[1]), 
                             "change": round(float(d[2]), 2),
-                            "name": d[3] # Uzun isim eklendi
+                            "name": d[3]
                         }
                 except: continue
             print(f"   -> ✅ BIST Başarılı: {len(data)} hisse.")
@@ -205,7 +183,6 @@ def get_abd_tradingview():
     print("4. ABD Borsası (TV Scanner) taranıyor...")
     url = "https://scanner.tradingview.com/america/scan"
     
-    # 'description' sütunu eklendi
     payload = {
         "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr"]}],
         "options": {"lang": "en"},
@@ -222,11 +199,10 @@ def get_abd_tradingview():
                 try:
                     d = h.get('d', [])
                     if len(d) > 4:
-                        # d[0]=Kod, d[1]=Fiyat, d[2]=Değişim, d[3]=MarketCap, d[4]=Uzun İsim
                         data[d[0]] = {
                             "price": float(d[1]), 
                             "change": round(float(d[2]), 2),
-                            "name": d[4] # Uzun isim eklendi
+                            "name": d[4]
                         }
                 except: continue
             print(f"   -> ✅ ABD Başarılı: {len(data)} hisse.")
@@ -251,7 +227,6 @@ def get_crypto_cmc(limit=250):
             for coin in r.json()['data']:
                 quote = coin['quote']['USD']
                 symbol = coin['symbol']
-                # 'name' alanı eklendi (Örn: Bitcoin)
                 data[f"{symbol}-USD"] = {
                     "price": round(float(quote['price']), 4),
                     "change": round(float(quote['percent_change_24h']), 2),
@@ -269,12 +244,9 @@ def get_tefas_lib():
     
     try:
         crawler = Crawler()
-        
-        # Son 5 günü çekelim ki hafta sonuna denk gelse bile veri bulabilelim
         bugun = datetime.now()
         baslangic = bugun - timedelta(days=5) 
         
-        # Veriyi çek
         df = crawler.fetch(
             start=baslangic.strftime("%Y-%m-%d"), 
             end=bugun.strftime("%Y-%m-%d"),
@@ -285,16 +257,13 @@ def get_tefas_lib():
             print("   -> ⚠️ TEFAS verisi boş geldi.")
             return {}
 
-        # İşlemler
         df['date'] = pd.to_datetime(df['date'])
         df = df.sort_values(by=['code', 'date'])
         
-        # Değişim Hesabı
         df['onceki_fiyat'] = df.groupby('code')['price'].shift(1)
         df['degisim'] = ((df['price'] - df['onceki_fiyat']) / df['onceki_fiyat']) * 100
         df['degisim'] = df['degisim'].fillna(0.0)
         
-        # Sadece son veriyi al
         df_latest = df.groupby('code').tail(1)
         
         data = {}
@@ -303,7 +272,7 @@ def get_tefas_lib():
             data[kod] = {
                 "price": float(item['price']),
                 "change": round(float(item['degisim']), 2),
-                "name": item.get('title', '') # Bu kısım zaten vardı, korundu.
+                "name": item.get('title', '')
             }
             
         print(f"   -> ✅ TEFAS Başarılı: {len(data)} fon çekildi.")
@@ -321,7 +290,7 @@ try:
     
     # 1. Veri Paketini Oluştur
     final_paket = {
-        "doviz_tl": get_doviz_finnhub(),
+        "doviz_tl": get_doviz_finnhub(), # <-- Finnhub kullanılıyor
         "altin_tl": get_altin_site(),
         "borsa_tr_tl": get_bist_tradingview(),
         "borsa_abd_usd": get_abd_tradingview(),
@@ -330,27 +299,19 @@ try:
         "last_updated": firestore.SERVER_TIMESTAMP
     }
 
-    # Eğer en az bir veri grubu doluysa işlemlere başla
     if any(len(v) > 0 for k,v in final_paket.items() if isinstance(v, dict)):
         
-        # GitHub sunucusu UTC çalışır. Biz Türkiye saatini (UTC+3) hesaplıyoruz.
         tr_saat = datetime.utcnow() + timedelta(hours=3)
         
-        # -------------------------------------------------------------
-        # ADIM 1: CANLI VERİYİ GÜNCELLE (Her zaman çalışır)
-        # -------------------------------------------------------------
+        # ADIM 1: CANLI VERİYİ GÜNCELLE
         try:
             db.collection(u'market_data').document(u'LIVE_PRICES').set(final_paket)
             print(f"✅ [{tr_saat.strftime('%H:%M:%S')}] CANLI Fiyatlar güncellendi.")
         except Exception as e:
             print(f"❌ Canlı veri yazma hatası: {e}")
 
-        # -------------------------------------------------------------
         # ADIM 2: KAPANIŞI ARŞİVLE (Sadece 18:30 Seansı)
-        # -------------------------------------------------------------
-        
         if tr_saat.hour == 18 and tr_saat.minute >= 20:
-            
             doc_id = tr_saat.strftime("%Y-%m-%d")
             snapshot_name = "18:30_Kapanis" 
             
@@ -359,7 +320,6 @@ try:
             day_ref.collection(u'snapshots').document(snapshot_name).set(final_paket, merge=True)
             
             print(f"💾 [{doc_id}] GÜN SONU KAPANIŞI Arşivlendi (Saat: {tr_saat.strftime('%H:%M')}).")
-            
         else:
             print(f"⏩ [{tr_saat.strftime('%H:%M')}] Tarihçe atlandı (Sadece 18:30 sonrası kapanış alınır).")
 
@@ -370,6 +330,3 @@ try:
 except Exception as e:
     print(f"KRİTİK HATA: {e}")
     sys.exit(1)
-
-
-
