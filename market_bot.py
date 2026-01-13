@@ -52,21 +52,27 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. DÖVİZ (FİNNHUB API - SELENIUMSUZ 🚀)
+# 1. DÖVİZ (EXCHANGERATE-API) - RESMİ VE ÜCRETSİZ SERVİS 🚀
 # ==============================================================================
-def get_doviz_finnhub():
-    print("1. Döviz Kurları (Finnhub) çekiliyor...")
+def get_doviz_exchangerate():
+    print("1. Döviz Kurları (ExchangeRate-API) çekiliyor...")
     
-    # API KEY KONTROLÜ
-    api_key = os.environ.get('FINNHUB_API_KEY')
+    # 1. API KEY'i Al
+    api_key = os.environ.get('EXCHANGERATE_API_KEY')
+    
     if not api_key:
-        print("   ⚠️ Finnhub API Key bulunamadı! (Secrets kontrol et)")
+        # Test için buraya kendi aldığın keyi geçici yazabilirsin
+        # api_key = "SENIN_YENI_ALDIGIN_KEY" 
+        print("   ⚠️ ExchangeRate API Key eksik! (Secrets kontrol et)")
         return {}
 
-    finnhub_client = finnhub.Client(api_key=api_key)
+    # 2. İstek URL'si (Base: USD seçiyoruz)
+    url = f"https://v6.exchangerate-api.com/v6/{api_key}/latest/USD"
+    
     data = {}
     
-    sembol_map = {
+    # Çekmek istediğin para birimleri
+    target_currencies = {
         "EUR": "Euro",
         "GBP": "Sterlin",
         "CHF": "İsviçre Frangı",
@@ -78,38 +84,43 @@ def get_doviz_finnhub():
     }
 
     try:
-        # Tek istekte veriyi al
-        rates_response = finnhub_client.forex_rates(base='USD')
-        quotes = rates_response.get('quote', {})
-        
-        # 1. Dolar/TL
-        dolar_tl = quotes.get('TRY', 0)
-        
-        if dolar_tl > 0:
-            data["USD"] = {
-                "price": round(float(dolar_tl), 4),
-                "change": 0.0,
-                "name": "Dolar"
-            }
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            json_data = response.json()
+            rates = json_data.get('conversion_rates', {})
+            
+            # 1. Dolar/TL Kuru (Zaten USD bazlı çektik, direkt TRY değeridir)
+            dolar_tl = rates.get('TRY', 0)
+            
+            if dolar_tl > 0:
+                data["USD"] = {
+                    "price": round(float(dolar_tl), 4),
+                    "change": 0.0, # Bu API anlık değişim % vermez
+                    "name": "Dolar"
+                }
 
-            # 2. Diğer Kurlar (Çapraz Kur Hesabı)
-            for kod, isim in sembol_map.items():
-                try:
-                    parite = quotes.get(kod, 0)
-                    if parite > 0:
-                        tl_karsiligi = dolar_tl / parite
-                        data[kod] = {
-                            "price": round(float(tl_karsiligi), 4),
-                            "change": 0.0,
-                            "name": isim
-                        }
-                except: continue
-        
-        print(f"   -> ✅ Finnhub Döviz Bitti: {len(data)} adet.")
-        return data
+                # 2. Diğer Kurları TL'ye Çevir
+                # Matematik: (1 USD kaç TL) / (1 USD kaç Euro) = 1 Euro kaç TL
+                for kod, isim in target_currencies.items():
+                    try:
+                        rate_vs_usd = rates.get(kod, 0)
+                        if rate_vs_usd > 0:
+                            tl_karsiligi = dolar_tl / rate_vs_usd
+                            data[kod] = {
+                                "price": round(float(tl_karsiligi), 4),
+                                "change": 0.0,
+                                "name": isim
+                            }
+                    except: continue
+            
+            print(f"   -> ✅ ExchangeRate Döviz Bitti: {len(data)} adet.")
+            return data
+        else:
+            print(f"   -> ⚠️ API Hatası: {response.status_code}")
+            return {}
 
     except Exception as e:
-        print(f"   -> ⚠️ Finnhub Hatası: {e}")
+        print(f"   -> ⚠️ Bağlantı Hatası: {e}")
         return {}
 
 # ==============================================================================
@@ -330,3 +341,4 @@ try:
 except Exception as e:
     print(f"KRİTİK HATA: {e}")
     sys.exit(1)
+
