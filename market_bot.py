@@ -51,123 +51,109 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. DÖVİZ (EXCHANGERATE-API) - 50+ PARA BİRİMİ 🌍
+# 1. DÖVİZ (EXCHANGERATE-API) - DEĞİŞİM HESAPLAMALI 📉📈
 # ==============================================================================
 def get_doviz_exchangerate():
     print("1. Döviz Kurları (ExchangeRate-API) çekiliyor...")
     
-    # 1. API KEY'i Al
     api_key = os.environ.get('EXCHANGERATE_API_KEY')
-    
     if not api_key:
-        print("   ⚠️ ExchangeRate API Key eksik! (Secrets kontrol et)")
+        print("   ⚠️ ExchangeRate API Key eksik!")
         return {}
 
-    # 2. İstek URL'si (Base: USD)
-    url = f"https://v6.exchangerate-api.com/v6/{api_key}/latest/USD"
-    
-    data = {}
-    
-    # --- GENİŞLETİLMİŞ PARA BİRİMİ LİSTESİ (50 ADET) ---
+    # --- PARA BİRİMİ LİSTESİ ---
     target_currencies = {
-        # ANA PARA BİRİMLERİ
-        "EUR": "Euro",
-        "GBP": "İngiliz Sterlini",
-        "CHF": "İsviçre Frangı",
-        "JPY": "Japon Yeni",
-        "CAD": "Kanada Doları",
-        "AUD": "Avustralya Doları",
-        "CNY": "Çin Yuanı",
-        "HKD": "Hong Kong Doları",
-        
-        # AVRUPA
-        "SEK": "İsveç Kronu",
-        "NOK": "Norveç Kronu",
-        "DKK": "Danimarka Kronu",
-        "PLN": "Polonya Zlotisi",
-        "HUF": "Macar Forinti",
-        "CZK": "Çek Korunası",
-        "RON": "Rumen Leyi",
-        "BGN": "Bulgar Levası",
-        "ISK": "İzlanda Kronu",
-        "UAH": "Ukrayna Grivnası",
-        "RUB": "Rus Rublesi",
-
-        # ORTA DOĞU
-        "SAR": "Suudi Arabistan Riyali",
-        "AED": "BAE Dirhemi",
-        "QAR": "Katar Riyali",
-        "KWD": "Kuveyt Dinarı",
-        "BHD": "Bahreyn Dinarı",
-        "OMR": "Umman Riyali",
-        "JOD": "Ürdün Dinarı",
-        "ILS": "İsrail Şekeli",
-        "EGP": "Mısır Lirası",
-
-        # ASYA & PASİFİK
-        "KRW": "Güney Kore Wonu",
-        "SGD": "Singapur Doları",
-        "INR": "Hindistan Rupisi",
-        "IDR": "Endonezya Rupiahı",
-        "MYR": "Malezya Ringgiti",
-        "PHP": "Filipin Pesosu",
-        "THB": "Tayland Bahtı",
-        "VND": "Vietnam Dongu",
-        "PKR": "Pakistan Rupisi",
-        "AZN": "Azerbaycan Manatı",
-        "GEL": "Gürcistan Larisi",
-        "KZT": "Kazakistan Tengesi",
-
-        # AMERİKA & AFRİKA
-        "MXN": "Meksika Pesosu",
-        "BRL": "Brezilya Reali",
-        "ARS": "Arjantin Pesosu",
-        "CLP": "Şili Pesosu",
-        "COP": "Kolombiya Pesosu",
-        "PEN": "Peru Solü",
-        "ZAR": "Güney Afrika Randı",
-        "MAD": "Fas Dirhemi"
+        "EUR": "Euro", "GBP": "İngiliz Sterlini", "CHF": "İsviçre Frangı",
+        "JPY": "Japon Yeni", "CAD": "Kanada Doları", "AUD": "Avustralya Doları",
+        "CNY": "Çin Yuanı", "HKD": "Hong Kong Doları", "SEK": "İsveç Kronu",
+        "NOK": "Norveç Kronu", "DKK": "Danimarka Kronu", "PLN": "Polonya Zlotisi",
+        "HUF": "Macar Forinti", "CZK": "Çek Korunası", "RON": "Rumen Leyi",
+        "BGN": "Bulgar Levası", "ISK": "İzlanda Kronu", "UAH": "Ukrayna Grivnası",
+        "RUB": "Rus Rublesi", "SAR": "Suudi Arabistan Riyali", "AED": "BAE Dirhemi",
+        "QAR": "Katar Riyali", "KWD": "Kuveyt Dinarı", "BHD": "Bahreyn Dinarı",
+        "OMR": "Umman Riyali", "JOD": "Ürdün Dinarı", "ILS": "İsrail Şekeli",
+        "EGP": "Mısır Lirası", "KRW": "Güney Kore Wonu", "SGD": "Singapur Doları",
+        "INR": "Hindistan Rupisi", "IDR": "Endonezya Rupiahı", "MYR": "Malezya Ringgiti",
+        "PHP": "Filipin Pesosu", "THB": "Tayland Bahtı", "VND": "Vietnam Dongu",
+        "PKR": "Pakistan Rupisi", "AZN": "Azerbaycan Manatı", "GEL": "Gürcistan Larisi",
+        "KZT": "Kazakistan Tengesi", "MXN": "Meksika Pesosu", "BRL": "Brezilya Reali",
+        "ARS": "Arjantin Pesosu", "CLP": "Şili Pesosu", "COP": "Kolombiya Pesosu",
+        "PEN": "Peru Solü", "ZAR": "Güney Afrika Randı", "MAD": "Fas Dirhemi"
     }
 
     try:
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            json_data = response.json()
-            rates = json_data.get('conversion_rates', {})
+        # 1. BUGÜNÜN KURLARINI AL
+        url_today = f"https://v6.exchangerate-api.com/v6/{api_key}/latest/USD"
+        resp_today = requests.get(url_today, timeout=10)
+        
+        # 2. DÜNÜN KURLARINI AL (DEĞİŞİM HESABI İÇİN)
+        # Hafta sonu kontrolü yapılabilir ama API genelde son kapanışı verir.
+        dun = datetime.now() - timedelta(days=1)
+        yil, ay, gun = dun.strftime("%Y"), dun.strftime("%m"), dun.strftime("%d")
+        
+        # History URL Formatı: /history/USD/YYYY/MM/DD
+        url_yesterday = f"https://v6.exchangerate-api.com/v6/{api_key}/history/USD/{yil}/{ay}/{gun}"
+        resp_yesterday = requests.get(url_yesterday, timeout=10)
+
+        if resp_today.status_code == 200:
+            rates_today = resp_today.json().get('conversion_rates', {})
             
-            # 1. Dolar/TL Kuru (Referans)
-            dolar_tl = rates.get('TRY', 0)
+            # Dün verisi başarılıysa al, değilse boş sözlük yap
+            rates_yesterday = {}
+            if resp_yesterday.status_code == 200:
+                rates_yesterday = resp_yesterday.json().get('conversion_rates', {})
+
+            data = {}
             
-            if dolar_tl > 0:
-                # Önce Doları Ekle
+            # Dolar/TL Referansı
+            dolar_tl_today = rates_today.get('TRY', 0)
+            dolar_tl_yesterday = rates_yesterday.get('TRY', 0)
+
+            # DOLAR HESABI
+            if dolar_tl_today > 0:
+                degisim_usd = 0.0
+                if dolar_tl_yesterday > 0:
+                    degisim_usd = ((dolar_tl_today - dolar_tl_yesterday) / dolar_tl_yesterday) * 100
+                
                 data["USD"] = {
-                    "price": round(float(dolar_tl), 4),
-                    "change": 0.0,
+                    "price": round(float(dolar_tl_today), 4),
+                    "change": round(degisim_usd, 2),
                     "name": "ABD Doları"
                 }
 
-                # 2. Diğer 50 Kurun TL Karşılığını Hesapla
-                # Formül: (1 USD kaç TL) / (1 USD kaç X Para)
+                # DİĞER KURLARIN HESABI
                 for kod, isim in target_currencies.items():
                     try:
-                        rate_vs_usd = rates.get(kod, 0)
-                        if rate_vs_usd > 0:
-                            tl_karsiligi = dolar_tl / rate_vs_usd
+                        # Bugünün Çapraz Kuru
+                        rate_usd_today = rates_today.get(kod, 0)
+                        
+                        # Dünün Çapraz Kuru
+                        rate_usd_yesterday = rates_yesterday.get(kod, 0)
+
+                        if rate_usd_today > 0:
+                            # TL Karşılığı: (DolarTL / Parite)
+                            tl_today = dolar_tl_today / rate_usd_today
+                            
+                            degisim_val = 0.0
+                            # Eğer dünün verisi de varsa değişimi hesapla
+                            if dolar_tl_yesterday > 0 and rate_usd_yesterday > 0:
+                                tl_yesterday = dolar_tl_yesterday / rate_usd_yesterday
+                                degisim_val = ((tl_today - tl_yesterday) / tl_yesterday) * 100
+                            
                             data[kod] = {
-                                "price": round(float(tl_karsiligi), 4),
-                                "change": 0.0,
+                                "price": round(float(tl_today), 4),
+                                "change": round(degisim_val, 2),
                                 "name": isim
                             }
                     except: continue
-            
-            print(f"   -> ✅ ExchangeRate Döviz Bitti: {len(data)} adet.")
+
+            print(f"   -> ✅ Döviz (% Değişimli) Bitti: {len(data)} adet.")
             return data
         else:
-            print(f"   -> ⚠️ API Hatası: {response.status_code}")
             return {}
 
     except Exception as e:
-        print(f"   -> ⚠️ Bağlantı Hatası: {e}")
+        print(f"   -> ⚠️ Hata: {e}")
         return {}
 
 # ==============================================================================
@@ -348,7 +334,7 @@ try:
     
     # 1. Veri Paketini Oluştur
     final_paket = {
-        "doviz_tl": get_doviz_exchangerate(), # <-- YENİ 50+ PARA BİRİMİ FONKSİYONU
+        "doviz_tl": get_doviz_exchangerate(),
         "altin_tl": get_altin_site(),
         "borsa_tr_tl": get_bist_tradingview(),
         "borsa_abd_usd": get_abd_tradingview(),
