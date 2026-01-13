@@ -58,21 +58,32 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. DÖVİZ (FİNNHUB API - SELENIUM YOK 🚀)
+# 1. DÖVİZ (FİNNHUB API) - GÜNCELLENDİ
 # ==============================================================================
 def get_doviz_finnhub():
     print("1. Döviz Kurları (Finnhub) çekiliyor...")
     
-    # Github Secrets veya environment variable'dan anahtarı al
-    api_key = os.environ.get('FINNHUB_API_KEY')
+    # -----------------------------------------------------------
+    # 🔑 API KEY AYARI
+    # 1. GitHub'da çalışırken Secret'tan okur.
+    # 2. Bilgisayarında test ederken elle yazdığını okur.
+    # -----------------------------------------------------------
+    api_key = os.environ.get('FINNHUB_API_KEY') 
+    
     if not api_key:
-        print("   ⚠️ Finnhub API Key bulunamadı! (Döviz atlanıyor)")
-        return {}
+        # TEST İÇİN: Kendi aldığın key'i tırnak içine yapıştır:
+        api_key = "sandbox_c... (BURAYA SENİN KEY GELECEK)" 
 
+    if not api_key or "BURAYA" in api_key:
+        print("   ⚠️ Finnhub API Key eksik! (Lütfen kodu düzenleyip keyi ekle)")
+        return {}
+    
+    # Bağlantıyı kur
     finnhub_client = finnhub.Client(api_key=api_key)
     data = {}
     
-    # Hedeflediğimiz Dövizlerin İsimleri
+    # İSTEDİĞİN DÖVİZLER LİSTESİ
+    # Finnhub'dan 150 tane veri gelir, biz sadece bunları seçip alacağız.
     sembol_map = {
         "EUR": "Euro",
         "GBP": "Sterlin",
@@ -85,27 +96,26 @@ def get_doviz_finnhub():
     }
 
     try:
-        # TEK BİR İSTEKLE TÜM DÜNYA KURLARINI ALIYORUZ (Base: USD)
-        # Bu fonksiyon {'quote': {'TRY': 30.15, 'EUR': 0.92, ...}} döner.
+        # Tek istekte 150+ para birimi gelir
         rates_response = finnhub_client.forex_rates(base='USD')
         quotes = rates_response.get('quote', {})
         
-        # 1. Dolar/TL Kuru (Zaten USD bazlı çektiğimiz için direkt TRY değeridir)
+        # 1. Dolar/TL'yi bul (Bazı verilerde TRY, bazılarında USDTRY yazar)
         dolar_tl = quotes.get('TRY', 0)
         
         if dolar_tl > 0:
-            # Doları listeye ekle
+            # Doları ekle
             data["USD"] = {
                 "price": round(float(dolar_tl), 4),
-                "change": 0.0, # Forex_rates endpoint'i anlık değişim vermez, 0 geçiyoruz.
+                "change": 0.0, # Finnhub ücretsiz planda anlık değişim % vermez
                 "name": "Dolar"
             }
 
-            # 2. Diğer Kurları (Çapraz Kur Hesabı ile) TL'ye Çevir
-            # Örn: Euro/TL = (Dolar/TL) / (Dolar/Euro)
+            # 2. Diğerlerini TL'ye çevirip ekle
             for kod, isim in sembol_map.items():
                 try:
-                    parite = quotes.get(kod, 0) # Örn: USD/EUR = 0.92
+                    # Çapraz Kur: (Dolar/TL) / (Dolar/X_Para)
+                    parite = quotes.get(kod, 0) 
                     if parite > 0:
                         tl_karsiligi = dolar_tl / parite
                         data[kod] = {
@@ -360,5 +370,6 @@ try:
 except Exception as e:
     print(f"KRİTİK HATA: {e}")
     sys.exit(1)
+
 
 
