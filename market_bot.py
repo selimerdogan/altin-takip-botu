@@ -8,6 +8,7 @@ import json
 import warnings
 from bs4 import BeautifulSoup
 import time
+import finnhub
 import pandas as pd
 
 # --- YENİ EKLENEN KÜTÜPHANE (TEFAS) ---
@@ -57,92 +58,69 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. DÖVİZ (KAYNAK: FOREKS.COM - SELENIUM İLE)
+# 1. DÖVİZ (FİNNHUB API - SELENIUM YOK 🚀)
 # ==============================================================================
+def get_doviz_finnhub():
+    print("1. Döviz Kurları (Finnhub) çekiliyor...")
+    
+    # Github Secrets veya environment variable'dan anahtarı al
+    api_key = os.environ.get('FINNHUB_API_KEY')
+    if not api_key:
+        print("   ⚠️ Finnhub API Key bulunamadı! (Döviz atlanıyor)")
+        return {}
 
-def get_doviz_foreks():
-    print("1. Döviz Kurları (Foreks.com - Selenium) çekiliyor...")
+    finnhub_client = finnhub.Client(api_key=api_key)
     data = {}
     
-    # SIRALAMA ÖNEMLİ:
-    isim_map = {
-        "Kanada Doları": "CAD", 
-        "Euro": "EUR", 
-        "Sterlin": "GBP", 
-        "İsviçre Frangı": "CHF",
-        "Japon Yeni": "JPY", 
-        "Rus Rublesi": "RUB",
-        "Çin Yuanı": "CNY", 
-        "BAE Dirhemi": "BAE",
-        "Dolar": "USD"
+    # Hedeflediğimiz Dövizlerin İsimleri
+    sembol_map = {
+        "EUR": "Euro",
+        "GBP": "Sterlin",
+        "CHF": "İsviçre Frangı",
+        "JPY": "Japon Yeni",
+        "RUB": "Rus Rublesi",
+        "CNY": "Çin Yuanı",
+        "CAD": "Kanada Doları",
+        "AED": "BAE Dirhemi"
     }
 
-    url = "https://www.foreks.com/doviz/"
-    
-    chrome_options = Options()
-    chrome_options.add_argument("--headless") 
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    
-    driver = None
     try:
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-        driver.get(url)
-        time.sleep(5)
+        # TEK BİR İSTEKLE TÜM DÜNYA KURLARINI ALIYORUZ (Base: USD)
+        # Bu fonksiyon {'quote': {'TRY': 30.15, 'EUR': 0.92, ...}} döner.
+        rates_response = finnhub_client.forex_rates(base='USD')
+        quotes = rates_response.get('quote', {})
         
-        soup = BeautifulSoup(driver.page_source, "html.parser")
-        rows = soup.find_all("tr")
+        # 1. Dolar/TL Kuru (Zaten USD bazlı çektiğimiz için direkt TRY değeridir)
+        dolar_tl = quotes.get('TRY', 0)
         
-        for row in rows:
-            text_row = row.get_text()
+        if dolar_tl > 0:
+            # Doları listeye ekle
+            data["USD"] = {
+                "price": round(float(dolar_tl), 4),
+                "change": 0.0, # Forex_rates endpoint'i anlık değişim vermez, 0 geçiyoruz.
+                "name": "Dolar"
+            }
 
-            # Bitcoin SATIRINI ATLA
-            if "Bitcoin" in text_row:
-                continue
-            
-            found_key = None
-            found_name = None # Uzun isim için değişken
-
-            for tr_name, kod in isim_map.items():
-                if tr_name in text_row:
-                    found_key = kod
-                    found_name = tr_name # Uzun ismi yakala (Örn: Kanada Doları)
-                    break 
-            
-            if found_key:
-                cols = row.find_all("td")
-                if len(cols) >= 3:
-                    try:
-                        fiyat_raw = cols[1].get_text(strip=True)
-                        degisim_raw = cols[2].get_text(strip=True)
-                        
-                        fiyat = metni_sayiya_cevir(fiyat_raw)
-                        degisim = metni_sayiya_cevir(degisim_raw)
-                        
-                        if fiyat == 0 and len(cols) > 5:
-                             fiyat_raw = cols[5].get_text(strip=True)
-                             fiyat = metni_sayiya_cevir(fiyat_raw)
-
-                        if fiyat > 0:
-                            # 'name' alanı eklendi
-                            data[found_key] = {
-                                "price": fiyat, 
-                                "change": degisim, 
-                                "name": found_name
-                            }
-                    except: continue
-
-        print(f"   -> ✅ Foreks Döviz Bitti: {len(data)} adet.")
+            # 2. Diğer Kurları (Çapraz Kur Hesabı ile) TL'ye Çevir
+            # Örn: Euro/TL = (Dolar/TL) / (Dolar/Euro)
+            for kod, isim in sembol_map.items():
+                try:
+                    parite = quotes.get(kod, 0) # Örn: USD/EUR = 0.92
+                    if parite > 0:
+                        tl_karsiligi = dolar_tl / parite
+                        data[kod] = {
+                            "price": round(float(tl_karsiligi), 4),
+                            "change": 0.0,
+                            "name": isim
+                        }
+                except: continue
+        
+        print(f"   -> ✅ Finnhub Döviz Bitti: {len(data)} adet.")
+        return data
 
     except Exception as e:
-        print(f"   -> ⚠️ Foreks Selenium Hatası: {e}")
-        
-    finally:
-        if driver: driver.quit()
-        
-    return data
-
+        print(f"   -> ⚠️ Finnhub Hatası: {e}")
+        return {}
 # ==============================================================================
 # 2. ALTIN (DOVIZ.COM)
 # ==============================================================================
@@ -382,3 +360,4 @@ try:
 except Exception as e:
     print(f"KRİTİK HATA: {e}")
     sys.exit(1)
+
