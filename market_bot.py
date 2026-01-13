@@ -9,7 +9,6 @@ import warnings
 from bs4 import BeautifulSoup
 import time
 import pandas as pd
-import finnhub # <-- YENİ EKLENEN (Selenium yerine)
 
 # --- YENİ EKLENEN KÜTÜPHANE (TEFAS) ---
 from tefas import Crawler
@@ -52,7 +51,7 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. DÖVİZ (EXCHANGERATE-API) - RESMİ VE ÜCRETSİZ SERVİS 🚀
+# 1. DÖVİZ (EXCHANGERATE-API) - 50+ PARA BİRİMİ 🌍
 # ==============================================================================
 def get_doviz_exchangerate():
     print("1. Döviz Kurları (ExchangeRate-API) çekiliyor...")
@@ -61,26 +60,73 @@ def get_doviz_exchangerate():
     api_key = os.environ.get('EXCHANGERATE_API_KEY')
     
     if not api_key:
-        # Test için buraya kendi aldığın keyi geçici yazabilirsin
-        # api_key = "SENIN_YENI_ALDIGIN_KEY" 
         print("   ⚠️ ExchangeRate API Key eksik! (Secrets kontrol et)")
         return {}
 
-    # 2. İstek URL'si (Base: USD seçiyoruz)
+    # 2. İstek URL'si (Base: USD)
     url = f"https://v6.exchangerate-api.com/v6/{api_key}/latest/USD"
     
     data = {}
     
-    # Çekmek istediğin para birimleri
+    # --- GENİŞLETİLMİŞ PARA BİRİMİ LİSTESİ (50 ADET) ---
     target_currencies = {
+        # ANA PARA BİRİMLERİ
         "EUR": "Euro",
-        "GBP": "Sterlin",
+        "GBP": "İngiliz Sterlini",
         "CHF": "İsviçre Frangı",
         "JPY": "Japon Yeni",
-        "RUB": "Rus Rublesi",
-        "CNY": "Çin Yuanı",
         "CAD": "Kanada Doları",
-        "AED": "BAE Dirhemi"
+        "AUD": "Avustralya Doları",
+        "CNY": "Çin Yuanı",
+        "HKD": "Hong Kong Doları",
+        
+        # AVRUPA
+        "SEK": "İsveç Kronu",
+        "NOK": "Norveç Kronu",
+        "DKK": "Danimarka Kronu",
+        "PLN": "Polonya Zlotisi",
+        "HUF": "Macar Forinti",
+        "CZK": "Çek Korunası",
+        "RON": "Rumen Leyi",
+        "BGN": "Bulgar Levası",
+        "ISK": "İzlanda Kronu",
+        "UAH": "Ukrayna Grivnası",
+        "RUB": "Rus Rublesi",
+
+        # ORTA DOĞU
+        "SAR": "Suudi Arabistan Riyali",
+        "AED": "BAE Dirhemi",
+        "QAR": "Katar Riyali",
+        "KWD": "Kuveyt Dinarı",
+        "BHD": "Bahreyn Dinarı",
+        "OMR": "Umman Riyali",
+        "JOD": "Ürdün Dinarı",
+        "ILS": "İsrail Şekeli",
+        "EGP": "Mısır Lirası",
+
+        # ASYA & PASİFİK
+        "KRW": "Güney Kore Wonu",
+        "SGD": "Singapur Doları",
+        "INR": "Hindistan Rupisi",
+        "IDR": "Endonezya Rupiahı",
+        "MYR": "Malezya Ringgiti",
+        "PHP": "Filipin Pesosu",
+        "THB": "Tayland Bahtı",
+        "VND": "Vietnam Dongu",
+        "PKR": "Pakistan Rupisi",
+        "AZN": "Azerbaycan Manatı",
+        "GEL": "Gürcistan Larisi",
+        "KZT": "Kazakistan Tengesi",
+
+        # AMERİKA & AFRİKA
+        "MXN": "Meksika Pesosu",
+        "BRL": "Brezilya Reali",
+        "ARS": "Arjantin Pesosu",
+        "CLP": "Şili Pesosu",
+        "COP": "Kolombiya Pesosu",
+        "PEN": "Peru Solü",
+        "ZAR": "Güney Afrika Randı",
+        "MAD": "Fas Dirhemi"
     }
 
     try:
@@ -89,18 +135,19 @@ def get_doviz_exchangerate():
             json_data = response.json()
             rates = json_data.get('conversion_rates', {})
             
-            # 1. Dolar/TL Kuru (Zaten USD bazlı çektik, direkt TRY değeridir)
+            # 1. Dolar/TL Kuru (Referans)
             dolar_tl = rates.get('TRY', 0)
             
             if dolar_tl > 0:
+                # Önce Doları Ekle
                 data["USD"] = {
                     "price": round(float(dolar_tl), 4),
-                    "change": 0.0, # Bu API anlık değişim % vermez
-                    "name": "Dolar"
+                    "change": 0.0,
+                    "name": "ABD Doları"
                 }
 
-                # 2. Diğer Kurları TL'ye Çevir
-                # Matematik: (1 USD kaç TL) / (1 USD kaç Euro) = 1 Euro kaç TL
+                # 2. Diğer 50 Kurun TL Karşılığını Hesapla
+                # Formül: (1 USD kaç TL) / (1 USD kaç X Para)
                 for kod, isim in target_currencies.items():
                     try:
                         rate_vs_usd = rates.get(kod, 0)
@@ -301,7 +348,7 @@ try:
     
     # 1. Veri Paketini Oluştur
     final_paket = {
-        "doviz_tl": get_doviz_exchangerate(), 
+        "doviz_tl": get_doviz_exchangerate(), # <-- YENİ 50+ PARA BİRİMİ FONKSİYONU
         "altin_tl": get_altin_site(),
         "borsa_tr_tl": get_bist_tradingview(),
         "borsa_abd_usd": get_abd_tradingview(),
@@ -341,5 +388,3 @@ try:
 except Exception as e:
     print(f"KRİTİK HATA: {e}")
     sys.exit(1)
-
-
