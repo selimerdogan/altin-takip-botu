@@ -301,7 +301,7 @@ try:
     
     # 1. Veri Paketini Oluştur
     final_paket = {
-        "doviz_tl": get_doviz_finnhub(), # <-- Finnhub kullanılıyor
+        "doviz_tl": get_doviz_exchangerate(), 
         "altin_tl": get_altin_site(),
         "borsa_tr_tl": get_bist_tradingview(),
         "borsa_abd_usd": get_abd_tradingview(),
@@ -341,4 +341,5 @@ try:
 except Exception as e:
     print(f"KRİTİK HATA: {e}")
     sys.exit(1)
+
 
