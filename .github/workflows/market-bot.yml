@@ -29,6 +29,6 @@ jobs:
         env:
           FIREBASE_KEY: ${{ secrets.FIREBASE_KEY }}
           CMC_API_KEY: ${{ secrets.CMC_API_KEY }}
-          # DEĞİŞİKLİK 2: Finnhub anahtarı eklendi
-          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }} 
+          # YENİ EKLENEN ANAHTAR:
+          EXCHANGERATE_API_KEY: ${{ secrets.EXCHANGERATE_API_KEY }}
         run: python market_bot.py
