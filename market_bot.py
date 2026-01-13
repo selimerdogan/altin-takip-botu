@@ -51,7 +51,36 @@ def metni_sayiya_cevir(metin):
         return 0.0
 
 # ==============================================================================
-# 1. DÖVİZ (EXCHANGERATE-API) - DEĞİŞİM HESAPLAMALI 📉📈
+# YARDIMCI FONKSİYON: DÜNKÜ KAPANIŞI GETİR (Firebase'den)
+# ==============================================================================
+def get_yesterday_prices_from_db():
+    """
+    API geçmiş veriyi vermediği için, dünün fiyatlarını 
+    kendi veritabanımızdaki (market_history) kayıttan okuruz.
+    """
+    try:
+        # Dünün tarihini bul
+        dun = datetime.now() - timedelta(days=1)
+        doc_id = dun.strftime("%Y-%m-%d")
+        
+        # Firebase'den dünün kapanışını oku
+        doc_ref = db.collection(u'market_history').document(doc_id).collection(u'snapshots').document(u'18:30_Kapanis')
+        doc = doc_ref.get()
+        
+        if doc.exists:
+            data = doc.to_dict()
+            # Dönen verinin içinde 'doviz_tl' var mı?
+            return data.get('doviz_tl', {})
+        else:
+            # Dün kayıt yoksa (Bot yeni başladıysa), bugünün ilk kaydına bakabiliriz
+            # Ya da boş döneriz, değişim 0 görünür.
+            return {}
+    except Exception as e:
+        print(f"   ⚠️ Geçmiş veri okuma hatası: {e}")
+        return {}
+
+# ==============================================================================
+# 1. DÖVİZ (EXCHANGERATE-API) - HİBRİT HESAPLAMA 🧠
 # ==============================================================================
 def get_doviz_exchangerate():
     print("1. Döviz Kurları (ExchangeRate-API) çekiliyor...")
@@ -82,34 +111,27 @@ def get_doviz_exchangerate():
     }
 
     try:
-        # 1. BUGÜNÜN KURLARINI AL
+        # 1. ANLIK VERİYİ ÇEK (API)
         url_today = f"https://v6.exchangerate-api.com/v6/{api_key}/latest/USD"
         resp_today = requests.get(url_today, timeout=10)
         
-        # 2. DÜNÜN KURLARINI AL (DEĞİŞİM HESABI İÇİN)
-        # Hafta sonu kontrolü yapılabilir ama API genelde son kapanışı verir.
-        dun = datetime.now() - timedelta(days=1)
-        yil, ay, gun = dun.strftime("%Y"), dun.strftime("%m"), dun.strftime("%d")
-        
-        # History URL Formatı: /history/USD/YYYY/MM/DD
-        url_yesterday = f"https://v6.exchangerate-api.com/v6/{api_key}/history/USD/{yil}/{ay}/{gun}"
-        resp_yesterday = requests.get(url_yesterday, timeout=10)
+        # 2. DÜNKÜ VERİYİ ÇEK (FIREBASE)
+        rates_yesterday_db = get_yesterday_prices_from_db()
+        history_source = "DB" if rates_yesterday_db else "NONE"
 
         if resp_today.status_code == 200:
             rates_today = resp_today.json().get('conversion_rates', {})
-            
-            # Dün verisi başarılıysa al, değilse boş sözlük yap
-            rates_yesterday = {}
-            if resp_yesterday.status_code == 200:
-                rates_yesterday = resp_yesterday.json().get('conversion_rates', {})
-
             data = {}
             
             # Dolar/TL Referansı
             dolar_tl_today = rates_today.get('TRY', 0)
-            dolar_tl_yesterday = rates_yesterday.get('TRY', 0)
+            
+            # Dünkü Dolar Fiyatını Bul
+            dolar_tl_yesterday = 0
+            if history_source == "DB" and "USD" in rates_yesterday_db:
+                dolar_tl_yesterday = rates_yesterday_db["USD"].get("price", 0)
 
-            # DOLAR HESABI
+            # --- DOLAR HESABI ---
             if dolar_tl_today > 0:
                 degisim_usd = 0.0
                 if dolar_tl_yesterday > 0:
@@ -121,24 +143,23 @@ def get_doviz_exchangerate():
                     "name": "ABD Doları"
                 }
 
-                # DİĞER KURLARIN HESABI
+                # --- DİĞER KURLAR ---
                 for kod, isim in target_currencies.items():
                     try:
-                        # Bugünün Çapraz Kuru
                         rate_usd_today = rates_today.get(kod, 0)
                         
-                        # Dünün Çapraz Kuru
-                        rate_usd_yesterday = rates_yesterday.get(kod, 0)
-
                         if rate_usd_today > 0:
-                            # TL Karşılığı: (DolarTL / Parite)
+                            # Bugünün TL Değeri
                             tl_today = dolar_tl_today / rate_usd_today
                             
+                            # Değişim Hesabı
                             degisim_val = 0.0
-                            # Eğer dünün verisi de varsa değişimi hesapla
-                            if dolar_tl_yesterday > 0 and rate_usd_yesterday > 0:
-                                tl_yesterday = dolar_tl_yesterday / rate_usd_yesterday
-                                degisim_val = ((tl_today - tl_yesterday) / tl_yesterday) * 100
+                            
+                            # Eğer veritabanında bu kurun dünkü kaydı varsa onu kullan
+                            if history_source == "DB" and kod in rates_yesterday_db:
+                                tl_yesterday = rates_yesterday_db[kod].get("price", 0)
+                                if tl_yesterday > 0:
+                                    degisim_val = ((tl_today - tl_yesterday) / tl_yesterday) * 100
                             
                             data[kod] = {
                                 "price": round(float(tl_today), 4),
@@ -147,7 +168,7 @@ def get_doviz_exchangerate():
                             }
                     except: continue
 
-            print(f"   -> ✅ Döviz (% Değişimli) Bitti: {len(data)} adet.")
+            print(f"   -> ✅ Döviz Bitti ({len(data)} adet). Değişim Kaynağı: {history_source}")
             return data
         else:
             return {}
