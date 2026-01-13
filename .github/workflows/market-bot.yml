@@ -22,10 +22,13 @@ jobs:
           python-version: '3.11'
 
       - name: Kütüphaneleri Yükle
-        run: pip install firebase-admin requests pandas yfinance beautifulsoup4 selenium webdriver-manager tefas-crawler
+        # DEĞİŞİKLİK 1: Selenium silindi, Finnhub eklendi.
+        run: pip install firebase-admin requests pandas yfinance beautifulsoup4 tefas-crawler finnhub-python
 
       - name: Botu Çalıştır
         env:
           FIREBASE_KEY: ${{ secrets.FIREBASE_KEY }}
           CMC_API_KEY: ${{ secrets.CMC_API_KEY }}
+          # DEĞİŞİKLİK 2: Finnhub anahtarı eklendi
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }} 
         run: python market_bot.py
