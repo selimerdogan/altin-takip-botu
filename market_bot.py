@@ -54,10 +54,6 @@ def metni_sayiya_cevir(metin):
 # YARDIMCI FONKSİYON: DÜNKÜ KAPANIŞI GETİR (Firebase'den)
 # ==============================================================================
 def get_yesterday_prices_from_db():
-    """
-    API geçmiş veriyi vermediği için, dünün fiyatlarını 
-    kendi veritabanımızdaki (market_history) kayıttan okuruz.
-    """
     try:
         # Dünün tarihini bul
         dun = datetime.now() - timedelta(days=1)
@@ -69,14 +65,11 @@ def get_yesterday_prices_from_db():
         
         if doc.exists:
             data = doc.to_dict()
-            # Dönen verinin içinde 'doviz_tl' var mı?
             return data.get('doviz_tl', {})
         else:
-            # Dün kayıt yoksa (Bot yeni başladıysa), bugünün ilk kaydına bakabiliriz
-            # Ya da boş döneriz, değişim 0 görünür.
             return {}
     except Exception as e:
-        print(f"   ⚠️ Geçmiş veri okuma hatası: {e}")
+        print(f"    ⚠️ Geçmiş veri okuma hatası: {e}")
         return {}
 
 # ==============================================================================
@@ -87,7 +80,7 @@ def get_doviz_exchangerate():
     
     api_key = os.environ.get('EXCHANGERATE_API_KEY')
     if not api_key:
-        print("   ⚠️ ExchangeRate API Key eksik!")
+        print("    ⚠️ ExchangeRate API Key eksik!")
         return {}
 
     # --- PARA BİRİMİ LİSTESİ ---
@@ -140,7 +133,8 @@ def get_doviz_exchangerate():
                 data["USD"] = {
                     "price": round(float(dolar_tl_today), 4),
                     "change": round(degisim_usd, 2),
-                    "name": "ABD Doları"
+                    "name": "ABD Doları",
+                    "type": "currency"
                 }
 
                 # --- DİĞER KURLAR ---
@@ -164,17 +158,18 @@ def get_doviz_exchangerate():
                             data[kod] = {
                                 "price": round(float(tl_today), 4),
                                 "change": round(degisim_val, 2),
-                                "name": isim
+                                "name": isim,
+                                "type": "currency"
                             }
                     except: continue
 
-            print(f"   -> ✅ Döviz Bitti ({len(data)} adet). Değişim Kaynağı: {history_source}")
+            print(f"    -> ✅ Döviz Bitti ({len(data)} adet). Değişim Kaynağı: {history_source}")
             return data
         else:
             return {}
 
     except Exception as e:
-        print(f"   -> ⚠️ Hata: {e}")
+        print(f"    -> ⚠️ Hata: {e}")
         return {}
 
 # ==============================================================================
@@ -201,12 +196,13 @@ def get_altin_site():
                                     data[isim] = {
                                         "price": fiyat, 
                                         "change": degisim, 
-                                        "name": isim
+                                        "name": isim,
+                                        "type": "gold"
                                     }
                         except: continue
     except Exception as e:
-        print(f"   -> ⚠️ Altın Hata: {e}")
-    print(f"   -> ✅ Altın Bitti: {len(data)} adet.")
+        print(f"    -> ⚠️ Altın Hata: {e}")
+    print(f"    -> ✅ Altın Bitti: {len(data)} adet.")
     return data
 
 # ==============================================================================
@@ -234,10 +230,11 @@ def get_bist_tradingview():
                         data[d[0]] = {
                             "price": float(d[1]), 
                             "change": round(float(d[2]), 2),
-                            "name": d[3]
+                            "name": d[3],
+                            "type": "stock"
                         }
                 except: continue
-            print(f"   -> ✅ BIST Başarılı: {len(data)} hisse.")
+            print(f"    -> ✅ BIST Başarılı: {len(data)} hisse.")
     except: pass
     return data
 
@@ -267,10 +264,11 @@ def get_abd_tradingview():
                         data[d[0]] = {
                             "price": float(d[1]), 
                             "change": round(float(d[2]), 2),
-                            "name": d[4]
+                            "name": d[4],
+                            "type": "stock"
                         }
                 except: continue
-            print(f"   -> ✅ ABD Başarılı: {len(data)} hisse.")
+            print(f"    -> ✅ ABD Başarılı: {len(data)} hisse.")
     except: pass
     return data
 
@@ -279,7 +277,7 @@ def get_abd_tradingview():
 # ==============================================================================
 def get_crypto_cmc(limit=250):
     if not CMC_API_KEY:
-        print("   -> ⚠️ CMC Key Yok.")
+        print("    -> ⚠️ CMC Key Yok.")
         return {}
     print(f"5. Kripto Piyasası (CMC Top {limit}) taranıyor...")
     url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest'
@@ -295,9 +293,10 @@ def get_crypto_cmc(limit=250):
                 data[f"{symbol}-USD"] = {
                     "price": round(float(quote['price']), 4),
                     "change": round(float(quote['percent_change_24h']), 2),
-                    "name": coin['name'] 
+                    "name": coin['name'],
+                    "type": "crypto"
                 }
-            print(f"   -> ✅ CMC Başarılı: {len(data)} coin.")
+            print(f"    -> ✅ CMC Başarılı: {len(data)} coin.")
     except: pass
     return data
 
@@ -319,7 +318,7 @@ def get_tefas_lib():
         )
         
         if df is None or df.empty:
-            print("   -> ⚠️ TEFAS verisi boş geldi.")
+            print("    -> ⚠️ TEFAS verisi boş geldi.")
             return {}
 
         df['date'] = pd.to_datetime(df['date'])
@@ -337,14 +336,15 @@ def get_tefas_lib():
             data[kod] = {
                 "price": float(item['price']),
                 "change": round(float(item['degisim']), 2),
-                "name": item.get('title', '')
+                "name": item.get('title', ''),
+                "type": "fund"
             }
             
-        print(f"   -> ✅ TEFAS Başarılı: {len(data)} fon çekildi.")
+        print(f"    -> ✅ TEFAS Başarılı: {len(data)} fon çekildi.")
         return data
 
     except Exception as e:
-        print(f"   -> ⚠️ TEFAS Hatası: {e}")
+        print(f"    -> ⚠️ TEFAS Hatası: {e}")
         return {}
 
 # ==============================================================================
