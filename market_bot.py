@@ -55,35 +55,56 @@ def metni_sayiya_cevir(metin):
 # ==============================================================================
 def get_yesterday_prices_from_db():
     try:
-        # Dünün tarihini bul
         dun = datetime.now() - timedelta(days=1)
         doc_id = dun.strftime("%Y-%m-%d")
-        
-        # Firebase'den dünün kapanışını oku
         doc_ref = db.collection(u'market_history').document(doc_id).collection(u'snapshots').document(u'18:30_Kapanis')
         doc = doc_ref.get()
-        
         if doc.exists:
             data = doc.to_dict()
             return data.get('doviz_tl', {})
-        else:
-            return {}
+        return {}
     except Exception as e:
         print(f"    ⚠️ Geçmiş veri okuma hatası: {e}")
         return {}
 
 # ==============================================================================
-# 1. DÖVİZ (EXCHANGERATE-API) - HİBRİT HESAPLAMA 🧠
+# 0. BIST 100 ENDEKSİ (TRADINGVIEW) - YENİ! 📈
+# ==============================================================================
+def get_bist100_index():
+    print("0. BIST 100 Endeksi çekiliyor...")
+    url = "https://scanner.tradingview.com/turkey/scan"
+    payload = {
+        "symbols": {"tickers": ["BIST:XU100"], "query": {"types": []}},
+        "columns": ["name", "close", "change", "description"]
+    }
+    try:
+        r = requests.post(url, json=payload, headers=headers_general, timeout=20)
+        if r.status_code == 200:
+            res_data = r.json().get('data', [])
+            if res_data:
+                d = res_data[0].get('d', [])
+                return {
+                    "XU100": {
+                        "price": float(d[1]),
+                        "change": round(float(d[2]), 2),
+                        "name": "BIST 100",
+                        "type": "index"
+                    }
+                }
+    except Exception as e:
+        print(f"    ⚠️ BIST100 Hatası: {e}")
+    return {}
+
+# ==============================================================================
+# 1. DÖVİZ (EXCHANGERATE-API)
 # ==============================================================================
 def get_doviz_exchangerate():
     print("1. Döviz Kurları (ExchangeRate-API) çekiliyor...")
-    
     api_key = os.environ.get('EXCHANGERATE_API_KEY')
     if not api_key:
         print("    ⚠️ ExchangeRate API Key eksik!")
         return {}
 
-    # --- PARA BİRİMİ LİSTESİ ---
     target_currencies = {
         "EUR": "Euro", "GBP": "İngiliz Sterlini", "CHF": "İsviçre Frangı",
         "JPY": "Japon Yeni", "CAD": "Kanada Doları", "AUD": "Avustralya Doları",
@@ -104,27 +125,19 @@ def get_doviz_exchangerate():
     }
 
     try:
-        # 1. ANLIK VERİYİ ÇEK (API)
         url_today = f"https://v6.exchangerate-api.com/v6/{api_key}/latest/USD"
         resp_today = requests.get(url_today, timeout=10)
-        
-        # 2. DÜNKÜ VERİYİ ÇEK (FIREBASE)
         rates_yesterday_db = get_yesterday_prices_from_db()
         history_source = "DB" if rates_yesterday_db else "NONE"
 
         if resp_today.status_code == 200:
             rates_today = resp_today.json().get('conversion_rates', {})
             data = {}
-            
-            # Dolar/TL Referansı
             dolar_tl_today = rates_today.get('TRY', 0)
-            
-            # Dünkü Dolar Fiyatını Bul
             dolar_tl_yesterday = 0
             if history_source == "DB" and "USD" in rates_yesterday_db:
                 dolar_tl_yesterday = rates_yesterday_db["USD"].get("price", 0)
 
-            # --- DOLAR HESABI ---
             if dolar_tl_today > 0:
                 degisim_usd = 0.0
                 if dolar_tl_yesterday > 0:
@@ -137,19 +150,12 @@ def get_doviz_exchangerate():
                     "type": "currency"
                 }
 
-                # --- DİĞER KURLAR ---
                 for kod, isim in target_currencies.items():
                     try:
                         rate_usd_today = rates_today.get(kod, 0)
-                        
                         if rate_usd_today > 0:
-                            # Bugünün TL Değeri
                             tl_today = dolar_tl_today / rate_usd_today
-                            
-                            # Değişim Hesabı
                             degisim_val = 0.0
-                            
-                            # Eğer veritabanında bu kurun dünkü kaydı varsa onu kullan
                             if history_source == "DB" and kod in rates_yesterday_db:
                                 tl_yesterday = rates_yesterday_db[kod].get("price", 0)
                                 if tl_yesterday > 0:
@@ -162,12 +168,8 @@ def get_doviz_exchangerate():
                                 "type": "currency"
                             }
                     except: continue
-
-            print(f"    -> ✅ Döviz Bitti ({len(data)} adet). Değişim Kaynağı: {history_source}")
             return data
-        else:
-            return {}
-
+        return {}
     except Exception as e:
         print(f"    -> ⚠️ Hata: {e}")
         return {}
@@ -202,16 +204,14 @@ def get_altin_site():
                         except: continue
     except Exception as e:
         print(f"    -> ⚠️ Altın Hata: {e}")
-    print(f"    -> ✅ Altın Bitti: {len(data)} adet.")
     return data
 
 # ==============================================================================
-# 3. BIST (TRADINGVIEW)
+# 3. BIST HİSSELERİ (TRADINGVIEW)
 # ==============================================================================
 def get_bist_tradingview():
     print("3. Borsa İstanbul (TV Scanner) taranıyor...")
     url = "https://scanner.tradingview.com/turkey/scan"
-    
     payload = {
         "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr"]}],
         "options": {"lang": "tr"},
@@ -234,7 +234,6 @@ def get_bist_tradingview():
                             "type": "stock"
                         }
                 except: continue
-            print(f"    -> ✅ BIST Başarılı: {len(data)} hisse.")
     except: pass
     return data
 
@@ -244,7 +243,6 @@ def get_bist_tradingview():
 def get_abd_tradingview():
     print("4. ABD Borsası (TV Scanner) taranıyor...")
     url = "https://scanner.tradingview.com/america/scan"
-    
     payload = {
         "filter": [{"left": "type", "operation": "in_range", "right": ["stock", "dr"]}],
         "options": {"lang": "en"},
@@ -268,7 +266,6 @@ def get_abd_tradingview():
                             "type": "stock"
                         }
                 except: continue
-            print(f"    -> ✅ ABD Başarılı: {len(data)} hisse.")
     except: pass
     return data
 
@@ -296,7 +293,6 @@ def get_crypto_cmc(limit=250):
                     "name": coin['name'],
                     "type": "crypto"
                 }
-            print(f"    -> ✅ CMC Başarılı: {len(data)} coin.")
     except: pass
     return data
 
@@ -305,31 +301,23 @@ def get_crypto_cmc(limit=250):
 # ==============================================================================
 def get_tefas_lib():
     print("6. TEFAS Fonları (Kütüphane) çekiliyor...")
-    
     try:
         crawler = Crawler()
         bugun = datetime.now()
         baslangic = bugun - timedelta(days=5) 
-        
         df = crawler.fetch(
             start=baslangic.strftime("%Y-%m-%d"), 
             end=bugun.strftime("%Y-%m-%d"),
             columns=["code", "date", "price", "title"]
         )
-        
         if df is None or df.empty:
-            print("    -> ⚠️ TEFAS verisi boş geldi.")
             return {}
-
         df['date'] = pd.to_datetime(df['date'])
         df = df.sort_values(by=['code', 'date'])
-        
         df['onceki_fiyat'] = df.groupby('code')['price'].shift(1)
         df['degisim'] = ((df['price'] - df['onceki_fiyat']) / df['onceki_fiyat']) * 100
         df['degisim'] = df['degisim'].fillna(0.0)
-        
         df_latest = df.groupby('code').tail(1)
-        
         data = {}
         for item in df_latest.to_dict('records'):
             kod = item['code']
@@ -339,22 +327,19 @@ def get_tefas_lib():
                 "name": item.get('title', ''),
                 "type": "fund"
             }
-            
-        print(f"    -> ✅ TEFAS Başarılı: {len(data)} fon çekildi.")
         return data
-
     except Exception as e:
         print(f"    -> ⚠️ TEFAS Hatası: {e}")
         return {}
 
 # ==============================================================================
-# KAYIT (SADECE KAPANIŞ YEDEĞİ - TOLERANSLI)
+# KAYIT VE ÇALIŞTIRICI
 # ==============================================================================
 try:
     print("--- PİYASA BOTU BAŞLIYOR ---")
     
-    # 1. Veri Paketini Oluştur
     final_paket = {
+        "endeks_tr": get_bist100_index(), # BIST 100 Eklendi
         "doviz_tl": get_doviz_exchangerate(),
         "altin_tl": get_altin_site(),
         "borsa_tr_tl": get_bist_tradingview(),
@@ -365,31 +350,20 @@ try:
     }
 
     if any(len(v) > 0 for k,v in final_paket.items() if isinstance(v, dict)):
-        
         tr_saat = datetime.utcnow() + timedelta(hours=3)
-        
-        # ADIM 1: CANLI VERİYİ GÜNCELLE
-        try:
-            db.collection(u'market_data').document(u'LIVE_PRICES').set(final_paket)
-            print(f"✅ [{tr_saat.strftime('%H:%M:%S')}] CANLI Fiyatlar güncellendi.")
-        except Exception as e:
-            print(f"❌ Canlı veri yazma hatası: {e}")
+        # 1. CANLI VERİ
+        db.collection(u'market_data').document(u'LIVE_PRICES').set(final_paket)
+        print(f"✅ [{tr_saat.strftime('%H:%M:%S')}] CANLI Fiyatlar güncellendi.")
 
-        # ADIM 2: KAPANIŞI ARŞİVLE (Sadece 18:30 Seansı)
+        # 2. KAPANIŞ ARŞİVİ
         if tr_saat.hour == 18 and tr_saat.minute >= 20:
             doc_id = tr_saat.strftime("%Y-%m-%d")
-            snapshot_name = "18:30_Kapanis" 
-            
             day_ref = db.collection(u'market_history').document(doc_id)
             day_ref.set({'date': doc_id}, merge=True)
-            day_ref.collection(u'snapshots').document(snapshot_name).set(final_paket, merge=True)
-            
-            print(f"💾 [{doc_id}] GÜN SONU KAPANIŞI Arşivlendi (Saat: {tr_saat.strftime('%H:%M')}).")
-        else:
-            print(f"⏩ [{tr_saat.strftime('%H:%M')}] Tarihçe atlandı (Sadece 18:30 sonrası kapanış alınır).")
-
+            day_ref.collection(u'snapshots').document("18:30_Kapanis").set(final_paket, merge=True)
+            print(f"💾 [{doc_id}] GÜN SONU KAPANIŞI Arşivlendi.")
     else:
-        print("❌ HATA: Hiçbir veri çekilemedi!")
+        print("❌ HATA: Veri çekilemedi!")
         sys.exit(1)
 
 except Exception as e:
