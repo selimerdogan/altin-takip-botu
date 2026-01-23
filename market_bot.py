@@ -270,9 +270,9 @@ def get_abd_tradingview():
     return data
 
 # ==============================================================================
-# 5. KRİPTO (CMC API)
+# 5. KRİPTO (CMC API) - LİMİT 500'E ÇIKARILDI
 # ==============================================================================
-def get_crypto_cmc(limit=250):
+def get_crypto_cmc(limit=500): # Varsayılan değer 500 oldu
     if not CMC_API_KEY:
         print("    -> ⚠️ CMC Key Yok.")
         return {}
@@ -282,7 +282,7 @@ def get_crypto_cmc(limit=250):
     headers = {'Accepts': 'application/json', 'X-CMC_PRO_API_KEY': CMC_API_KEY}
     data = {}
     try:
-        r = requests.get(url, headers=headers, params=params, timeout=20)
+        r = requests.get(url, headers=headers, params=params, timeout=30) # Timeout biraz arttırıldı
         if r.status_code == 200:
             for coin in r.json()['data']:
                 quote = coin['quote']['USD']
@@ -293,7 +293,8 @@ def get_crypto_cmc(limit=250):
                     "name": coin['name'],
                     "type": "crypto"
                 }
-    except: pass
+    except Exception as e: 
+        print(f"    -> ⚠️ Kripto Hatası: {e}")
     return data
 
 # ==============================================================================
@@ -369,3 +370,4 @@ try:
 except Exception as e:
     print(f"KRİTİK HATA: {e}")
     sys.exit(1)
+
