@@ -345,7 +345,7 @@ try:
         "altin_tl": get_altin_site(),
         "borsa_tr_tl": get_bist_tradingview(),
         "borsa_abd_usd": get_abd_tradingview(),
-        "kripto_usd": get_crypto_cmc(250),
+        "kripto_usd": get_crypto_cmc(500),
         "fon_tl": get_tefas_lib(),
         "last_updated": firestore.SERVER_TIMESTAMP
     }
@@ -370,4 +370,5 @@ try:
 except Exception as e:
     print(f"KRİTİK HATA: {e}")
     sys.exit(1)
+
 
