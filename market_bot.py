@@ -249,7 +249,7 @@ def get_abd_tradingview():
         "symbols": {"query": {"types": []}, "tickers": []},
         "columns": ["name", "close", "change", "market_cap_basic", "description"],
         "sort": {"sortBy": "market_cap_basic", "sortOrder": "desc"},
-        "range": [0, 1000]
+        "range": [0, 750]
     }
     data = {}
     try:
@@ -370,6 +370,7 @@ try:
 except Exception as e:
     print(f"KRİTİK HATA: {e}")
     sys.exit(1)
+
 
 
 
