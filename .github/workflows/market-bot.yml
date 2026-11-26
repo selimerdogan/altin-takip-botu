@@ -22,8 +22,7 @@ jobs:
           python-version: '3.11'
 
       - name: Kütüphaneleri Yükle
-        # DEĞİŞİKLİK 1: Selenium silindi, Finnhub eklendi.
-        run: pip install firebase-admin requests pandas yfinance beautifulsoup4 tefas-crawler finnhub-python
+        run: pip install -r requirements.txt
 
       - name: Botu Çalıştır
         env:

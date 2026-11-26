@@ -5,5 +5,7 @@ lxml
 openpyxl
 beautifulsoup4
 yfinance
-tefas
+tefas-crawler
 finnhub-python
+fastapi
+uvicorn[standard]
