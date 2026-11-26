@@ -1,4 +1,5 @@
 import requests
+import re
 import firebase_admin
 from firebase_admin import credentials, firestore
 from datetime import datetime, timedelta
@@ -164,8 +165,15 @@ def get_altin_site():
                     tds = tr.find_all("td")
                     if len(tds) > 3:
                         try:
-                            isim = tds[0].get_text(strip=True)
-                            if "Ons" not in isim:
+                            a_tag = tds[0].find("a")
+                            if a_tag:
+                                raw_isim = a_tag.get_text(strip=True)
+                            else:
+                                raw_isim = tds[0].get_text(strip=True)
+                            # Saat etiketini (örn: 15:07, 15:06) temizle
+                            isim = re.sub(r'\s*\d{1,2}:\d{2}$', '', raw_isim).strip()
+                            
+                            if "Ons" not in isim and isim:
                                 fiyat = metni_sayiya_cevir(tds[2].get_text(strip=True))
                                 degisim = metni_sayiya_cevir(tds[3].get_text(strip=True))
                                 if fiyat > 0: 
