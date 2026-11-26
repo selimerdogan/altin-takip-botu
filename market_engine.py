@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 import time
 import pandas as pd
 from tefas import Crawler
+from concurrent.futures import ThreadPoolExecutor
 from alarm_engine import check_and_trigger_alarms
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -184,6 +185,22 @@ def get_altin_site():
                                         "type": "gold"
                                     }
                         except: continue
+            
+            # Vario ticker uyumluluğu için alias ekle (Gram Gümüş -> Gümüş, Gram Altın -> Altın)
+            if "Gram Gümüş" in data and "Gümüş" not in data:
+                data["Gümüş"] = {
+                    "price": data["Gram Gümüş"]["price"],
+                    "change": data["Gram Gümüş"]["change"],
+                    "name": "Gümüş",
+                    "type": "gold"
+                }
+            if "Gram Altın" in data and "Altın" not in data:
+                data["Altın"] = {
+                    "price": data["Gram Altın"]["price"],
+                    "change": data["Gram Altın"]["change"],
+                    "name": "Altın",
+                    "type": "gold"
+                }
     except Exception as e:
         print(f"    -> ⚠️ Altın Hata: {e}")
     return data
@@ -272,37 +289,97 @@ def get_crypto_cmc(limit=500):
     return data
 
 def get_tefas_lib():
-    print("6. TEFAS Fonları (Kütüphane) çekiliyor...")
-    try:
-        crawler = Crawler()
-        bugun = datetime.now()
-        baslangic = bugun - timedelta(days=5) 
-        df = crawler.fetch(
-            start=baslangic.strftime("%Y-%m-%d"), 
-            end=bugun.strftime("%Y-%m-%d"),
-            columns=["code", "date", "price", "title"]
-        )
-        if df is None or df.empty:
-            return {}
-        df['date'] = pd.to_datetime(df['date'])
-        df = df.sort_values(by=['code', 'date'])
-        df['onceki_fiyat'] = df.groupby('code')['price'].shift(1)
-        df['degisim'] = ((df['price'] - df['onceki_fiyat']) / df['onceki_fiyat']) * 100
-        df['degisim'] = df['degisim'].fillna(0.0)
-        df_latest = df.groupby('code').tail(1)
-        data = {}
-        for item in df_latest.to_dict('records'):
-            kod = item['code']
-            data[kod] = {
-                "price": float(item['price']),
-                "change": round(float(item['degisim']), 2),
-                "name": item.get('title', ''),
-                "type": "fund"
-            }
-        return data
-    except Exception as e:
-        print(f"    -> ⚠️ TEFAS Hatası: {e}")
+    print("6. TEFAS Fonları (Doğrudan Yüksek Hızlı API) çekiliyor...")
+    list_url = 'https://www.tefas.gov.tr/api/funds/fonGetiriBazliBilgiGetir'
+    detail_url = 'https://www.tefas.gov.tr/api/funds/fonBilgiGetir'
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Content-Type': 'application/json'
+    }
+
+    all_funds = {}
+    session = requests.Session()
+    adapter = requests.adapters.HTTPAdapter(pool_connections=35, pool_maxsize=35, max_retries=2)
+    session.mount('https://', adapter)
+
+    for kind in ['YAT', 'EMK', 'BYF']:
+        p = {
+            'dil': 'TR', 'fonTipi': kind, 'kurucuKodu': None, 'sfonTurKod': None, 'fonTurAciklama': None,
+            'islem': 1, 'fonTurKod': None, 'fonGrubu': None, 'donemGetiri1a': '1', 'donemGetiri3a': '1',
+            'donemGetiri6a': '1', 'donemGetiri1y': '1', 'donemGetiriyb': '1', 'donemGetiri3y': '1',
+            'donemGetiri5y': '1', 'basTarih': None, 'bitTarih': None, 'calismaTipi': 2, 'getiriOrani': '1'
+        }
+        try:
+            r = session.post(list_url, json=p, headers=headers, timeout=10)
+            if r.status_code == 200:
+                for row in (r.json() or {}).get('resultList', []):
+                    code = row.get('fonKodu')
+                    if code and code not in all_funds:
+                        all_funds[code] = row.get('fonUnvan', '')
+        except Exception as e:
+            print(f"    ⚠️ TEFAS {kind} liste hatası: {e}")
+
+    codes = list(all_funds.keys())
+    print(f"   -> Toplam {len(codes)} adet aktif TEFAS fonu listelendi, detaylar çekiliyor...")
+
+    if not codes:
+        try:
+            crawler = Crawler(fund_limit=2000)
+            bugun = datetime.now()
+            baslangic = bugun - timedelta(days=5) 
+            df = crawler.fetch(start=baslangic.strftime("%Y-%m-%d"), end=bugun.strftime("%Y-%m-%d"), columns=["code", "date", "price", "title"])
+            if df is not None and not df.empty:
+                df['date'] = pd.to_datetime(df['date'])
+                df = df.sort_values(by=['code', 'date'])
+                df['onceki_fiyat'] = df.groupby('code')['price'].shift(1)
+                df['degisim'] = ((df['price'] - df['onceki_fiyat']) / df['onceki_fiyat']) * 100
+                df_latest = df.groupby('code').tail(1)
+                fallback_data = {}
+                for item in df_latest.to_dict('records'):
+                    fallback_data[item['code']] = {
+                        "price": float(item['price']),
+                        "change": round(float(item.get('degisim', 0.0) or 0.0), 2),
+                        "name": item.get('title', ''),
+                        "type": "fund"
+                    }
+                return fallback_data
+        except Exception as fb_err:
+            print(f"    ⚠️ Crawler fallback hatası: {fb_err}")
         return {}
+
+    def fetch_fund(code):
+        for _ in range(3):
+            try:
+                res = session.post(detail_url, json={'fonKodu': code, 'dil': 'TR'}, headers=headers, timeout=8)
+                if res.status_code == 200:
+                    lst = (res.json() or {}).get('resultList', [])
+                    if lst:
+                        return lst[0]
+                time.sleep(0.04)
+            except Exception:
+                time.sleep(0.08)
+        return None
+
+    with ThreadPoolExecutor(max_workers=25) as executor:
+        results = list(executor.map(fetch_fund, codes))
+
+    data = {}
+    for item in results:
+        if not item or item.get('sonFiyat') is None:
+            continue
+        kod = item.get('fonKodu')
+        price = float(item.get('sonFiyat', 0.0))
+        change = float(item.get('gunlukGetiri', 0.0) or 0.0)
+        title = item.get('fonUnvan') or all_funds.get(kod, '')
+        data[kod] = {
+            "price": price,
+            "change": round(change, 2),
+            "name": title,
+            "type": "fund"
+        }
+
+    print(f"   -> ✅ Toplam {len(data)} adet TEFAS fonu fiyat ve getirisiyle hazırlandı.")
+    return data
 
 def execute_engine():
     db = init_firebase()
