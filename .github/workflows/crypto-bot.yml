@@ -1,0 +1,29 @@
+name: Kripto Bot (7/24 - Her 15 Dk)
+
+on:
+  schedule:
+    # 7/24 Her 15 dakikada bir (UTC)
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-crypto:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodları Çek
+        uses: actions/checkout@v4
+
+      - name: Python Kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Kütüphaneleri Yükle
+        run: pip install -r requirements.txt
+
+      - name: Kripto Botunu Çalıştır
+        env:
+          FIREBASE_KEY: ${{ secrets.FIREBASE_KEY }}
+          CMC_API_KEY: ${{ secrets.CMC_API_KEY }}
+        run: python market_bot.py --target crypto

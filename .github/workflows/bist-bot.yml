@@ -1,0 +1,29 @@
+name: BIST, Altın ve Döviz Bot (10:00 - 18:30 TR)
+
+on:
+  schedule:
+    # Hafta içi Pazartesi - Cuma TR 10:00 - 18:30 arası her 15 dakikada bir (UTC 07:00 - 15:45)
+    - cron: '*/15 7-15 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  run-bist:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodları Çek
+        uses: actions/checkout@v4
+
+      - name: Python Kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Kütüphaneleri Yükle
+        run: pip install -r requirements.txt
+
+      - name: BIST, Altın ve Döviz Botunu Çalıştır
+        env:
+          FIREBASE_KEY: ${{ secrets.FIREBASE_KEY }}
+          EXCHANGERATE_API_KEY: ${{ secrets.EXCHANGERATE_API_KEY }}
+        run: python market_bot.py --target bist

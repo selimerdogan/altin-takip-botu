@@ -379,44 +379,56 @@ def get_tefas_lib():
     print(f"   -> ✅ Toplam {len(data)} adet TEFAS fonu fiyat ve getirisiyle hazırlandı.")
     return data
 
-def execute_engine():
+def execute_engine(target=None):
     db = init_firebase()
-    print("--- 🚀 VARIO CLOUD RUN MARKET MOTORU BAŞLIYOR ---")
+    tr_saat = datetime.utcnow() + timedelta(hours=3)
+    target_str = (target or 'all').lower()
+    print(f"--- 🚀 VARIO MARKET MOTORU BAŞLIYOR (Target: {target_str}) ---")
     start_time = time.time()
     
     final_paket = {
-        "endeks_tr": get_bist100_index(),
-        "doviz_tl": get_doviz_exchangerate(db),
-        "altin_tl": get_altin_site(),
-        "borsa_tr_tl": get_bist_tradingview(),
-        "borsa_abd_usd": get_abd_tradingview(),
-        "kripto_usd": get_crypto_cmc(500),
-        "fon_tl": get_tefas_lib(),
         "last_updated": firestore.SERVER_TIMESTAMP
     }
 
-    if not any(len(v) > 0 for k,v in final_paket.items() if isinstance(v, dict)):
-        raise RuntimeError("Hiçbir kaynaktan piyasa verisi çekilemedi!")
+    if target_str in ['bist', 'all']:
+        final_paket["endeks_tr"] = get_bist100_index()
+        final_paket["doviz_tl"] = get_doviz_exchangerate(db)
+        final_paket["altin_tl"] = get_altin_site()
+        final_paket["borsa_tr_tl"] = get_bist_tradingview()
 
-    tr_saat = datetime.utcnow() + timedelta(hours=3)
+    if target_str in ['us', 'all']:
+        final_paket["borsa_abd_usd"] = get_abd_tradingview()
+
+    if target_str in ['crypto', 'all']:
+        final_paket["kripto_usd"] = get_crypto_cmc(500)
+
+    if target_str in ['funds', 'fon', 'all']:
+        final_paket["fon_tl"] = get_tefas_lib()
+
+    # 1. CANLI VERİ (Mevcut uygulamalar için LIVE_PRICES - merge=True ile diğer varlıkları ezmeden günceller)
+    db.collection('market_data').document('LIVE_PRICES').set(final_paket, merge=True)
     
-    # 1. CANLI VERİ (Mevcut uygulamalar için LIVE_PRICES)
-    db.collection('market_data').document('LIVE_PRICES').set(final_paket)
+    # 2. KOMPAKT KATEGORİK KAYITLAR
+    if "borsa_tr_tl" in final_paket:
+        db.collection('market_data').document('bist').set({"items": final_paket["borsa_tr_tl"], "updated": firestore.SERVER_TIMESTAMP})
+    if "doviz_tl" in final_paket:
+        db.collection('market_data').document('doviz').set({"items": final_paket["doviz_tl"], "updated": firestore.SERVER_TIMESTAMP})
+    if "altin_tl" in final_paket:
+        db.collection('market_data').document('altin').set({"items": final_paket["altin_tl"], "updated": firestore.SERVER_TIMESTAMP})
+    if "kripto_usd" in final_paket:
+        db.collection('market_data').document('kripto').set({"items": final_paket["kripto_usd"], "updated": firestore.SERVER_TIMESTAMP})
+    if "fon_tl" in final_paket:
+        db.collection('market_data').document('fon').set({"items": final_paket["fon_tl"], "updated": firestore.SERVER_TIMESTAMP})
+    if "borsa_abd_usd" in final_paket:
+        db.collection('market_data').document('ABD').set({"items": final_paket["borsa_abd_usd"], "updated": firestore.SERVER_TIMESTAMP})
     
-    # 2. KOMPAKT KATEGORİK KAYITLAR (Yeni nesil hızlı okuma için)
-    db.collection('market_data').document('bist').set({"items": final_paket["borsa_tr_tl"], "updated": firestore.SERVER_TIMESTAMP})
-    db.collection('market_data').document('doviz').set({"items": final_paket["doviz_tl"], "updated": firestore.SERVER_TIMESTAMP})
-    db.collection('market_data').document('altin').set({"items": final_paket["altin_tl"], "updated": firestore.SERVER_TIMESTAMP})
-    db.collection('market_data').document('kripto').set({"items": final_paket["kripto_usd"], "updated": firestore.SERVER_TIMESTAMP})
-    db.collection('market_data').document('fon').set({"items": final_paket["fon_tl"], "updated": firestore.SERVER_TIMESTAMP})
-    
-    print(f"✅ [{tr_saat.strftime('%H:%M:%S')}] CANLI Fiyatlar güncellendi.")
+    print(f"✅ [{tr_saat.strftime('%H:%M:%S')}] CANLI Fiyatlar ({target_str}) güncellendi.")
 
     # 3. ALARM KONTROLÜ & ANINDA PUSH BİLDİRİM
     alarm_results = check_and_trigger_alarms(final_paket, db)
 
-    # 4. GÜN SONU KAPANIK ARŞİVİ
-    if tr_saat.hour == 18 and tr_saat.minute >= 20:
+    # 4. GÜN SONU KAPANIK ARŞİVİ (Yalnızca hafta içi kapanış saatinde ve bist/all modunda)
+    if target_str in ['bist', 'all'] and tr_saat.hour == 18 and tr_saat.minute >= 20:
         doc_id = tr_saat.strftime("%Y-%m-%d")
         day_ref = db.collection('market_history').document(doc_id)
         day_ref.set({'date': doc_id}, merge=True)
@@ -424,17 +436,16 @@ def execute_engine():
         print(f"💾 [{doc_id}] GÜN SONU KAPANIŞI Arşivlendi.")
 
     elapsed = round(time.time() - start_time, 2)
+    counts = {}
+    for k in ["borsa_tr_tl", "borsa_abd_usd", "kripto_usd", "altin_tl", "doviz_tl", "fon_tl"]:
+        if k in final_paket and isinstance(final_paket[k], dict):
+            counts[k] = len(final_paket[k])
+
     return {
         "status": "success",
+        "target": target_str,
         "elapsed_seconds": elapsed,
         "timestamp": tr_saat.isoformat(),
-        "counts": {
-            "bist": len(final_paket["borsa_tr_tl"]),
-            "abd": len(final_paket["borsa_abd_usd"]),
-            "crypto": len(final_paket["kripto_usd"]),
-            "gold": len(final_paket["altin_tl"]),
-            "currency": len(final_paket["doviz_tl"]),
-            "funds": len(final_paket["fon_tl"])
-        },
+        "counts": counts,
         "alarms": alarm_results
     }

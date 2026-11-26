@@ -1,0 +1,28 @@
+name: ABD Borsası Bot (17:00 - 00:15 TR)
+
+on:
+  schedule:
+    # Hafta içi Pazartesi - Cuma TR 17:00 - 00:15 arası her 15 dakikada bir (UTC 14:00 - 21:30)
+    - cron: '*/15 14-21 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  run-us:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodları Çek
+        uses: actions/checkout@v4
+
+      - name: Python Kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Kütüphaneleri Yükle
+        run: pip install -r requirements.txt
+
+      - name: ABD Borsası Botunu Çalıştır
+        env:
+          FIREBASE_KEY: ${{ secrets.FIREBASE_KEY }}
+        run: python market_bot.py --target us

@@ -1,0 +1,28 @@
+name: TEFAS Fonları Bot (10:00 - 18:30 TR Saat Başı)
+
+on:
+  schedule:
+    # Hafta içi Pazartesi - Cuma TR 10:00 - 18:30 arası her saat başı (UTC 07:00 - 15:00)
+    - cron: '0 7-15 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  run-funds:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodları Çek
+        uses: actions/checkout@v4
+
+      - name: Python Kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Kütüphaneleri Yükle
+        run: pip install -r requirements.txt
+
+      - name: TEFAS Fonları Botunu Çalıştır
+        env:
+          FIREBASE_KEY: ${{ secrets.FIREBASE_KEY }}
+        run: python market_bot.py --target funds
