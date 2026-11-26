@@ -299,7 +299,7 @@ def get_tefas_lib():
 
     all_funds = {}
     session = requests.Session()
-    adapter = requests.adapters.HTTPAdapter(pool_connections=35, pool_maxsize=35, max_retries=2)
+    adapter = requests.adapters.HTTPAdapter(pool_connections=50, pool_maxsize=50, max_retries=1)
     session.mount('https://', adapter)
 
     for kind in ['YAT', 'EMK', 'BYF']:
@@ -310,7 +310,7 @@ def get_tefas_lib():
             'donemGetiri5y': '1', 'basTarih': None, 'bitTarih': None, 'calismaTipi': 2, 'getiriOrani': '1'
         }
         try:
-            r = session.post(list_url, json=p, headers=headers, timeout=10)
+            r = session.post(list_url, json=p, headers=headers, timeout=8)
             if r.status_code == 200:
                 for row in (r.json() or {}).get('resultList', []):
                     code = row.get('fonKodu')
@@ -348,19 +348,17 @@ def get_tefas_lib():
         return {}
 
     def fetch_fund(code):
-        for _ in range(3):
+        for _ in range(2):
             try:
-                res = session.post(detail_url, json={'fonKodu': code, 'dil': 'TR'}, headers=headers, timeout=8)
+                res = session.post(detail_url, json={'fonKodu': code, 'dil': 'TR'}, headers=headers, timeout=4)
                 if res.status_code == 200:
                     lst = (res.json() or {}).get('resultList', [])
-                    if lst:
-                        return lst[0]
-                time.sleep(0.04)
+                    return lst[0] if lst else None
             except Exception:
-                time.sleep(0.08)
+                pass
         return None
 
-    with ThreadPoolExecutor(max_workers=25) as executor:
+    with ThreadPoolExecutor(max_workers=40) as executor:
         results = list(executor.map(fetch_fund, codes))
 
     data = {}
